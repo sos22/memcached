@@ -39,7 +39,8 @@ struct fable_buf {
 #define fable_release_read_buf CONC(fable_release_read_buf_, FABLE_TYPE)
 #define fable_close CONC(fable_close_, FABLE_TYPE)
 #define fable_handle_name CONC(fable_handle_name_, FABLE_TYPE)
-#define fable_get_fd CONC(fable_get_fd_, FABLE_TYPE)
+#define fable_get_fd_read CONC(fable_get_fd_read_, FABLE_TYPE)
+#define fable_get_fd_write CONC(fable_get_fd_write_, FABLE_TYPE)
 
 #endif
 
@@ -87,7 +88,10 @@ struct fable_handle;
 					struct fable_buf* buf);		\
   void fable_close_ ## name (struct fable_handle *handle);		\
   const char *fable_handle_name_ ## name (struct fable_handle *handle);	\
-  int fable_get_fd_ ## name(struct fable_handle *handle)		\
+  int fable_get_fd_read_ ## name(struct fable_handle *handle,		\
+				 int *read);				\
+  int fable_get_fd_write_ ## name(struct fable_handle *handle,		\
+				  int *read)
 
 fable_mk_methods(unixdomain);
 fable_mk_methods(tcp);
@@ -144,7 +148,9 @@ static inline ssize_t fable_blocking_sendmsg(struct fable_handle *handle, const 
 
 #ifdef _EVENT_H_
 struct fable_event {
-  struct event event;
+  struct event send_event;
+  struct event recv_event;
+  struct event_base *base;
   struct fable_handle *handle;
   void (*handler)(struct fable_handle *, short, void *);
   void *ctxt;

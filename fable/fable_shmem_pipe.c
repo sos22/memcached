@@ -53,20 +53,17 @@ struct extent {
 	unsigned size;
 };
 
-// To differentiate the two handle types in close(); all other callbacks only accept one subtype.
-#define SHMEMPIPE_HANDLE_LISTEN 1
-#define SHMEMPIPE_HANDLE_CONN 2
+typedef struct {
+  int is_send;
+} simplex_id_t;
+
+#define SIMPLEX_SEND ((simplex_id_t){1})
+#define SIMPLEX_RECV ((simplex_id_t){2})
 
 struct shmem_simplex {
-  int type;
-  int fd;
-  char *name;
-};
+	int fd;
 
-struct shmem_simplex_conn {
-        struct shmem_simplex base;
-
-        int direction;
+        simplex_id_t simpl_id;
 	void *ring;
         int ring_pages;
 	struct alloc_node *first_alloc, *next_free_alloc, *last_freed_node;
@@ -87,6 +84,13 @@ struct shmem_simplex_conn {
         unsigned nr_outgoing_extents;
 	unsigned outgoing_extent_bytes;
 
+};
+
+struct shmem_handle {
+  int listen_fd; /* or -1 if this isn't a listening connection */
+  char *name;
+  struct shmem_simplex *send;
+  struct shmem_simplex *recv;
 };
 
 struct shmem_pipe_buf {
@@ -111,7 +115,7 @@ struct alloc_node {
 
 #ifndef NDEBUG
 static void
-sanity_check(const struct shmem_simplex_conn *sp)
+sanity_check(const struct shmem_simplex *sp)
 {
 	const struct alloc_node *cursor;
 	int found_nf = 0, found_lf = 0;
@@ -156,12 +160,12 @@ sanity_check(const struct shmem_simplex_conn *sp)
 }
 #else
 static void
-sanity_check(const struct shmem_simplex_conn *sp)
+sanity_check(const struct shmem_simplex *sp)
 {
 }
 #endif
 
-static unsigned any_shared_space(struct shmem_simplex_conn *sp)
+static unsigned any_shared_space(struct shmem_simplex *sp)
 {
 
   /* As its name suggests, if next_free_alloc is set, then it points to a free area. We can write at least 1 byte, so we're writable. */
@@ -177,7 +181,7 @@ static unsigned any_shared_space(struct shmem_simplex_conn *sp)
 }
 
 static unsigned
-alloc_shared_space(struct shmem_simplex_conn *sp, unsigned* size_out)
+alloc_shared_space(struct shmem_simplex *sp, unsigned* size_out)
 {
         unsigned size = *size_out;
 	unsigned res;
@@ -304,7 +308,7 @@ alloc_shared_space(struct shmem_simplex_conn *sp, unsigned* size_out)
 }
 
 static void
-release_shared_space(struct shmem_simplex_conn *sp, unsigned start, unsigned size)
+release_shared_space(struct shmem_simplex *sp, unsigned start, unsigned size)
 {
 	struct alloc_node *lan = sp->last_freed_node;
 	assert(start <= ring_size);
@@ -501,34 +505,24 @@ fable_init_shmem_pipe()
 }
 
 static struct shmem_simplex *
-shmem_listener(int fd)
+simplex_from_fable_handle(struct fable_handle *fh, simplex_id_t simpl)
 {
-  struct shmem_simplex *ss = calloc(sizeof(*ss), 1);
-  if (!ss)
-    return NULL;
-  ss->type = SHMEMPIPE_HANDLE_LISTEN;
-  ss->fd = fd;
-  return ss;
-}
-
-static struct shmem_simplex *
-simplex_from_fable_handle(struct fable_handle *fh)
-{
-  return (struct shmem_simplex *)fh;
-}
-
-static struct shmem_simplex_conn *
-simplex_conn_from_fable_handle(struct fable_handle *fh)
-{
-  return container_of(simplex_from_fable_handle(fh),
-		      struct shmem_simplex_conn,
-		      base);
+  struct shmem_handle *sd = (struct shmem_handle *)fh;
+  if (simpl.is_send)
+    return sd->send;
+  else
+    return sd->recv;
 }
 
 static struct fable_handle *
-fable_handle_from_shmem_simplex(struct shmem_simplex *fh)
+fable_handle_from_shmem_simplexes(struct shmem_simplex *send,
+				  struct shmem_simplex *recv)
 {
-  return (struct fable_handle *)fh;
+  struct shmem_handle *sd = calloc(sizeof(*sd), 1);
+  sd->listen_fd = -1;
+  sd->send = send;
+  sd->recv = recv;
+  return (struct fable_handle *)sd;
 }
 
 struct fable_handle *
@@ -536,15 +530,19 @@ fable_listen_shmem_pipe(const char* name)
 {
   void* unix_handle = fable_listen_unixdomain(name);
   if(!unix_handle)
-    return 0;
-  struct shmem_simplex* new_handle = shmem_listener(*(int *)unix_handle);
-  if(!new_handle)
     return NULL;
+  int fd = *(int *)unix_handle;
   free(unix_handle);
-  return fable_handle_from_shmem_simplex(new_handle);
+  struct shmem_handle *sd = calloc(sizeof(*sd), 1);
+  if (!sd) {
+      close(fd);
+      return NULL;
+  }
+  sd->listen_fd = fd;
+  return (struct fable_handle *)sd;
 }
 
-static void shmem_pipe_init_send(struct shmem_simplex_conn* new_handle) {
+static void shmem_pipe_init_send(struct shmem_simplex* new_handle) {
 
   new_handle->first_alloc = (struct alloc_node*)calloc(sizeof(*new_handle->first_alloc), 1);
   new_handle->first_alloc->is_free = 1;
@@ -553,17 +551,10 @@ static void shmem_pipe_init_send(struct shmem_simplex_conn* new_handle) {
 
 }
 
-struct fable_handle *
-fable_accept_shmem_pipe(struct fable_handle *handle, int direction) {
-
-  if(direction == FABLE_DIRECTION_DUPLEX) {
-    fprintf(stderr, "shmem_pipe transport can't do duplex yet\n");
-    return 0;
-  }
-
-  struct shmem_simplex* listen_handle = simplex_from_fable_handle(handle);
-
-  void* new_unix_handle = fable_accept_unixdomain((struct fable_handle *)&listen_handle->fd, FABLE_DIRECTION_DUPLEX);
+static struct shmem_simplex *
+accept_simplex(int listen_fd, simplex_id_t simpl)
+{
+  void* new_unix_handle = fable_accept_unixdomain((struct fable_handle *)&listen_fd, FABLE_DIRECTION_DUPLEX);
   if(!new_unix_handle)
     return 0;
 
@@ -591,7 +582,7 @@ fable_accept_shmem_pipe(struct fable_handle *handle, int direction) {
     return 0;
   }
 
-  struct shmem_simplex_conn* new_handle = calloc(sizeof(struct shmem_simplex_conn), 1);
+  struct shmem_simplex* new_handle = calloc(sizeof(struct shmem_simplex), 1);
   if(!new_handle) {
     close(shmem_fd);
     close(conn_fd);
@@ -599,21 +590,35 @@ fable_accept_shmem_pipe(struct fable_handle *handle, int direction) {
     return 0;
   }
 
-  new_handle->base.fd = conn_fd;
-  new_handle->base.type = SHMEMPIPE_HANDLE_CONN;
+  new_handle->fd = conn_fd;
   new_handle->ring = ring_addr;
   new_handle->ring_pages = seg_pages;
-  new_handle->direction = direction;
+  new_handle->simpl_id = simpl;
 
-  if(direction == FABLE_DIRECTION_SEND)
+  if (simpl.is_send)
     shmem_pipe_init_send(new_handle);
   // Otherwise memset-0 is enough
 
-  return fable_handle_from_shmem_simplex(&new_handle->base);
+  return new_handle;
 }
 
-struct fable_handle* fable_connect_shmem_pipe(const char* name, int direction) {
+struct fable_handle *
+fable_accept_shmem_pipe(struct fable_handle *handle, int direction)
+{
+  struct shmem_simplex *send, *recv;
+  struct shmem_handle *h = (struct shmem_handle *)handle;
+  send = NULL;
+  recv = NULL;
+  if (direction == FABLE_DIRECTION_DUPLEX || direction == FABLE_DIRECTION_RECEIVE)
+    recv = accept_simplex(h->listen_fd, SIMPLEX_RECV);
+  if (direction == FABLE_DIRECTION_DUPLEX || direction == FABLE_DIRECTION_SEND)
+    send = accept_simplex(h->listen_fd, SIMPLEX_SEND);
+  return fable_handle_from_shmem_simplexes(send, recv);
+}
 
+static struct shmem_simplex *
+connect_simplex(const char *name, simplex_id_t simplex)
+{
   // As the connection initiator, it's our responsibility to supply shared memory.
 
   char random_name[22];
@@ -659,29 +664,39 @@ struct fable_handle* fable_connect_shmem_pipe(const char* name, int direction) {
 
   write_all_fd(unix_fd, (const char*)&ring_pages, sizeof(int), 0);
 
-  struct shmem_simplex_conn* conn_handle = calloc(sizeof(struct shmem_simplex_conn), 1);
+  struct shmem_simplex* conn_handle = calloc(sizeof(struct shmem_simplex), 1);
 
-  conn_handle->base.fd = unix_fd;
-  conn_handle->base.type = SHMEMPIPE_HANDLE_CONN;
+  conn_handle->fd = unix_fd;
   conn_handle->ring = ring_addr;
   conn_handle->ring_pages = ring_pages;
-  conn_handle->direction = direction;
+  conn_handle->simpl_id = simplex;
 
-  if(direction == FABLE_DIRECTION_SEND)
+  if (simplex.is_send)
     shmem_pipe_init_send(conn_handle);
   // Otherwise memset-0 is enough
 
-  return fable_handle_from_shmem_simplex(&conn_handle->base);
+  return conn_handle;
+}
 
+struct fable_handle* fable_connect_shmem_pipe(const char* name, int direction)
+{
+  struct shmem_simplex *send, *recv;
+  send = NULL;
+  recv = NULL;
+  if (direction == FABLE_DIRECTION_DUPLEX || direction == FABLE_DIRECTION_SEND)
+    send = connect_simplex(name, SIMPLEX_SEND);
+  if (direction == FABLE_DIRECTION_DUPLEX || direction == FABLE_DIRECTION_RECEIVE)
+    recv = connect_simplex(name, SIMPLEX_RECV);
+  return fable_handle_from_shmem_simplexes(send, recv);
 }
 
 struct fable_buf* fable_get_read_buf_shmem_pipe(struct fable_handle* handle, unsigned len)
 {
-  struct shmem_simplex_conn *sp = simplex_conn_from_fable_handle(handle);
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
 
   while(sp->incoming_bytes_consumed - sp->incoming_bytes < sizeof(struct extent)) {
 
-    int k = read(sp->base.fd, (char *)sp->incoming + sp->incoming_bytes, sizeof(sp->incoming) - sp->incoming_bytes);
+    int k = read(sp->fd, (char *)sp->incoming + sp->incoming_bytes, sizeof(sp->incoming) - sp->incoming_bytes);
     if (k == 0) {
       errno = 0;
       return 0;
@@ -708,7 +723,7 @@ struct fable_buf* fable_get_read_buf_shmem_pipe(struct fable_handle* handle, uns
 
 void fable_release_read_buf_shmem_pipe(struct fable_handle* handle, struct fable_buf* fbuf) {
 
-  struct shmem_simplex_conn *sp = simplex_conn_from_fable_handle(handle);
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
   struct extent *inc = (struct extent*)(sp->incoming + sp->incoming_bytes_consumed);
   assert(((char*)sp->ring) + inc->base == fbuf->bufs[0].iov_base);
 
@@ -754,7 +769,7 @@ void fable_release_read_buf_shmem_pipe(struct fable_handle* handle, struct fable
 
   // TODO: blocking operations regardless of nonblocking status.
   if (sp->outgoing_extent_bytes > ring_size / 8) {
-    write_all_fd(sp->base.fd, (char*)sp->outgoing_extents, sp->nr_outgoing_extents * sizeof(struct extent), 1 /* Allow writing to closed socket */);
+    write_all_fd(sp->fd, (char*)sp->outgoing_extents, sp->nr_outgoing_extents * sizeof(struct extent), 1 /* Allow writing to closed socket */);
     sp->nr_outgoing_extents = 0;
     sp->outgoing_extent_bytes = 0;
   }
@@ -764,13 +779,13 @@ void fable_release_read_buf_shmem_pipe(struct fable_handle* handle, struct fable
 }
 
 // Return 1 for success, 0 for remote closed, -1 for error including EAGAIN
-static int wait_for_returned_buffers(struct shmem_simplex_conn *sp)
+static int wait_for_returned_buffers(struct shmem_simplex *sp)
 {
 	int r;
 	int s;
 	static int total_read;
 
-	s = read(sp->base.fd, sp->rx_buf + sp->rx_buf_prod, sizeof(sp->rx_buf) - sp->rx_buf_prod);
+	s = read(sp->fd, sp->rx_buf + sp->rx_buf_prod, sizeof(sp->rx_buf) - sp->rx_buf_prod);
 	if (s <= 0) {
 	  if(errno == ECONNRESET)
 	    errno = 0;
@@ -792,7 +807,7 @@ static int wait_for_returned_buffers(struct shmem_simplex_conn *sp)
 
 struct fable_buf* fable_get_write_buf_shmem_pipe(struct fable_handle* handle, unsigned len)
 {
-  struct shmem_simplex_conn *sp = simplex_conn_from_fable_handle(handle);
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
   unsigned long offset;
   unsigned allocated_len = len;
 
@@ -816,7 +831,7 @@ struct fable_buf* fable_get_write_buf_shmem_pipe(struct fable_handle* handle, un
 
 int fable_release_write_buf_shmem_pipe(struct fable_handle* handle, struct fable_buf* fbuf)
 {
-  struct shmem_simplex_conn *sp = simplex_conn_from_fable_handle(handle);
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
   struct extent ext;
 
   unsigned long offset = ((char*)fbuf->bufs[0].iov_base) - ((char*)sp->ring);
@@ -824,7 +839,7 @@ int fable_release_write_buf_shmem_pipe(struct fable_handle* handle, struct fable
   ext.size = fbuf->bufs[0].iov_len;
 
   // TODO: Blocking ops in nonblocking context
-  write_all_fd(sp->base.fd, (char*)&ext, sizeof(ext), 1 /* Allow writing to closed socket */);
+  write_all_fd(sp->fd, (char*)&ext, sizeof(ext), 1 /* Allow writing to closed socket */);
 
   assert(sp->nr_alloc_nodes <= 3);
 
@@ -835,82 +850,103 @@ int fable_release_write_buf_shmem_pipe(struct fable_handle* handle, struct fable
 // The hope is this won't make much difference because the extents are unlikely to fill enough space to ever actually block.
 void fable_set_nonblocking_shmem_pipe(struct fable_handle* handle)
 {
-  struct shmem_simplex *sp = simplex_from_fable_handle(handle);
-  setnb_fd(sp->fd);
+  struct shmem_simplex *sp;
+
+  sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
+  if (sp)
+    setnb_fd(sp->fd);
+
+  sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
+  if (sp)
+    setnb_fd(sp->fd);
 }
 
-static int action_needs_fd(struct shmem_simplex* sp, int type)
+static int action_needs_fd(struct fable_handle *handle, int type, int *fd)
 {
-  struct shmem_simplex_conn* conn_handle = container_of(sp, struct shmem_simplex_conn, base);
-
-  if(type == FABLE_SELECT_ACCEPT) {
+  struct shmem_simplex *sp;
+  int _fd;
+  if (!fd)
+    fd = &_fd;
+  switch (type) {
+  case FABLE_SELECT_READ:
+    sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
+    if (sp->incoming_bytes_consumed - sp->incoming_bytes < sizeof(struct extent)) {
+      *fd = sp->fd;
+      return 1;
+    } else {
+      return 0;
+    }
+  case FABLE_SELECT_WRITE:
+    sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
+    if (any_shared_space(sp)) {
+      return 0;
+    } else {
+      *fd = sp->fd;
+      return 1;
+    }
+  case FABLE_SELECT_ACCEPT:
+    *fd = ((struct shmem_handle *)handle)->listen_fd;
     return 1;
+  default:
+    abort();
   }
-  else if(type == FABLE_SELECT_READ) {
-    assert(conn_handle->direction == FABLE_DIRECTION_RECEIVE);
-    return (conn_handle->incoming_bytes_consumed - conn_handle->incoming_bytes < sizeof(struct extent));
-    // Otherwise at least one extent is waiting to be read, so we're ready now!
-  }
-  else {
-    assert(conn_handle->direction == FABLE_DIRECTION_SEND);
-    return !any_shared_space(conn_handle);
-    // Otherwise there's at least one free slot. It might be tiny, but write() could do something, so we must report we're writable.
-  }
-  
 }
 
-void fable_get_select_fds_shmem_pipe(struct fable_handle* handle, int type, int* maxfd, fd_set* rfds, fd_set* wfds, fd_set* efds, struct timeval* timeout) {
-
-  struct shmem_simplex *sp = simplex_from_fable_handle(handle);
-   
-  if(action_needs_fd(sp, type)) {
-    FD_SET(sp->fd, rfds);
-    if(sp->fd >= *maxfd)
-      *maxfd = (sp->fd + 1);
-  }
-  else {
+void fable_get_select_fds_shmem_pipe(struct fable_handle* handle, int type, int* maxfd, fd_set* rfds, fd_set* wfds, fd_set* efds, struct timeval* timeout)
+{
+  int fd;
+  if (action_needs_fd(handle, type, &fd)) {
+    FD_SET(fd, rfds);
+    if(fd >= *maxfd)
+      *maxfd = fd + 1;
+  } else {
     timeout->tv_sec = 0;
     timeout->tv_usec = 0;
   }
-  
 }
 
-int fable_ready_shmem_pipe(struct fable_handle* handle, int type, fd_set* rfds, fd_set* wfds, fd_set* efds) {
-  
-  struct shmem_simplex *sp = simplex_from_fable_handle(handle);
-  
-  if(action_needs_fd(sp, type))
-    return FD_ISSET(sp->fd, rfds);
-  else
+int fable_ready_shmem_pipe(struct fable_handle* handle, int type, fd_set* rfds, fd_set* wfds, fd_set* efds)
+{
+  int fd;
+  if (!action_needs_fd(handle, type, &fd))
     return 1;
-  
+  else
+    return FD_ISSET(fd, rfds);
 }
 
-void fable_close_shmem_pipe(struct fable_handle* handle) {
+static void
+close_simplex(struct shmem_simplex *sp)
+{
+  if (!sp)
+    return;
 
-  struct shmem_simplex *sp = simplex_from_fable_handle(handle);
-
-  free(sp->name);
   close(sp->fd);
 
-  if(sp->type == SHMEMPIPE_HANDLE_CONN) {
+  munmap(sp->ring, sp->ring_pages * 4096);
 
-    struct shmem_simplex_conn* conn_handle = container_of(sp, struct shmem_simplex_conn, base);
-    munmap(conn_handle->ring, conn_handle->ring_pages * 4096);
-
-    if(conn_handle->direction == FABLE_DIRECTION_SEND) {
-      // Clean up the free area list
-      struct alloc_node *n;
-      for (n = conn_handle->first_alloc; n;) {
-	struct alloc_node* next = n->next;
-	free(n);
-	n = next;
-      }
-      
+  if (sp->simpl_id.is_send) {
+    // Clean up the free area list
+    struct alloc_node *n;
+    for (n = sp->first_alloc; n;) {
+      struct alloc_node* next = n->next;
+      free(n);
+      n = next;
     }
-
   }
 
+  free(sp);
+}
+
+void fable_close_shmem_pipe(struct fable_handle* handle)
+{
+  struct shmem_handle *sh = (struct shmem_handle *)handle;
+
+  close_simplex(sh->send);
+  close_simplex(sh->recv);
+  if (sh->listen_fd >= 0)
+    close(sh->listen_fd);
+  free(sh->name);
+  free(sh);
 }
 
 // lend-read is a one shot read-into-this operation.
@@ -950,56 +986,115 @@ struct fable_buf* fable_lend_write_buf_shmem_pipe(struct fable_handle* handle, c
 
 const char *fable_handle_name_shmem_pipe(struct fable_handle* handle)
 {
-  struct shmem_simplex *c = simplex_from_fable_handle(handle);
-  if (!c->name) {
-    int r = asprintf(&c->name, "FABLE:SHMEM_PIPE:%s,%d",
-		     c->type == SHMEMPIPE_HANDLE_CONN ? "conn" : "listen",
-		     c->fd);
+  struct shmem_handle *sh = (struct shmem_handle *)handle;
+  if (!sh->name) {
+    int r = asprintf(&sh->name,
+		     "FABLE:SHMEM_PIPE:listen=%d,send=%d,recv=%d",
+		     sh->listen_fd,
+		     sh->send ? sh->send->fd : -1,
+		     sh->recv ? sh->recv->fd : -1);
     (void)r;
   }
-  return c->name;
+  return sh->name;
 }
 
-int fable_get_fd_shmem_pipe(struct fable_handle *handle)
+int fable_get_fd_read_shmem_pipe(struct fable_handle *handle, int *read_like)
 {
-  struct shmem_simplex *c = simplex_from_fable_handle(handle);
+  struct shmem_simplex *c = simplex_from_fable_handle(handle, SIMPLEX_RECV);
+  *read_like = 1;
+  return c->fd;
+}
+
+int fable_get_fd_write_shmem_pipe(struct fable_handle *handle, int *read_like)
+{
+  struct shmem_simplex *c = simplex_from_fable_handle(handle, SIMPLEX_SEND);
+  *read_like = 1;
   return c->fd;
 }
 
 void fable_abandon_write_buf_shmem_pipe(struct fable_handle *handle, struct fable_buf *fbuf)
 {
-  struct shmem_simplex_conn *sp = simplex_conn_from_fable_handle(handle);
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
   unsigned long offset = ((char*)fbuf->bufs[0].iov_base) - ((char*)sp->ring);
   release_shared_space(sp, offset, fbuf->bufs[0].iov_len);
   free(fbuf);
+}
+
+static void libevent_recv_handler(int fd, short which, void *ctxt)
+{
+  struct fable_event *evt = ctxt;
+  evt->handler(evt->handle, which, evt->ctxt);
+}
+
+static void libevent_send_handler(int fd, short which, void *ctxt)
+{
+  struct fable_event *evt = ctxt;
+  struct shmem_simplex *sp = simplex_from_fable_handle(evt->handle, SIMPLEX_SEND);
+  wait_for_returned_buffers(sp);
+  if (any_shared_space(sp))
+    evt->handler(evt->handle, EV_WRITE | (which & ~EV_READ), evt->ctxt);
 }
 
 void fable_add_event(struct fable_event *evt,
 		     struct event_base *base,
 		     struct fable_handle *handle,
 		     short event_flags,
-		     void (*handle)(struct fable_handle *handle,
-				    short which, void *ctxt),
+		     void (*handler)(struct fable_handle *handle,
+				     short which, void *ctxt),
 		     void *ctxt)
 {
+  struct shmem_simplex *recv_sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
+  struct shmem_simplex *send_sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
+
   evt->handle = handle;
   evt->handler = handler;
   evt->ctxt = ctxt;
+  evt->base = base;
 
-  event_set(&evt->recv_event, fable_get_fd(handle, SIMPLEX_RECV),
-	    EV_PERSIST|EV_READ, libevent_recv_handler, evt);
-  event_base_set(base, &evt->recv_event);
+  if (recv_sp) {
+    event_set(&evt->recv_event, recv_sp->fd,
+	      EV_PERSIST|EV_READ, libevent_recv_handler, evt);
+    event_base_set(base, &evt->recv_event);
+  }
 
   /* Note that we look for EV_READ even on the send channel! The FD
      here is the aux data socket, so we can read that when the other
      end has sent us something. */
-  event_set(&evt->send_event, fable_get_fd(handle, SIMPLEX_SEND),
-	    EV_PERSIST|EV_READ, libevent_recv_handler, evt);
-  event_base_set(base, &evt->send_event);
+  if (send_sp) {
+    event_set(&evt->send_event, send_sp->fd,
+	      EV_PERSIST|EV_READ, libevent_send_handler, evt);
+    event_base_set(base, &evt->send_event);
+  }
 
   if (event_flags & EV_READ) {
-    
+    if (recv_sp->incoming_bytes_consumed - recv_sp->incoming_bytes >= sizeof(struct extent)) {
+      event_active(&evt->recv_event, EV_READ, 1);
+    } else {
+      if (event_add(&evt->recv_event, 0) == -1)
+	abort();
+    }
   }
-  if (event_add(&evt->event, 0) == -1)
-    abort();
+
+  if (event_flags & EV_WRITE) {
+    if (any_shared_space(send_sp)) {
+      event_active(&evt->send_event, EV_READ, 1);
+    } else {
+      if (event_add(&evt->send_event, 0) == -1)
+	abort();
+    }
+  }
+}
+
+void fable_event_del(struct fable_event *evt)
+{
+  if (simplex_from_fable_handle(evt->handle, SIMPLEX_RECV))
+    event_del(&evt->recv_event);
+  if (simplex_from_fable_handle(evt->handle, SIMPLEX_SEND))
+    event_del(&evt->send_event);
+}
+
+void fable_event_change_flags(struct fable_event *evt, short flags)
+{
+  fable_event_del(evt);
+  fable_add_event(evt, evt->base, evt->handle, flags, evt->handler, evt->ctxt);
 }

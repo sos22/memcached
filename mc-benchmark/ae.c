@@ -73,11 +73,12 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask
 		      aeFileProc *proc, void *clientData)
 {
     if (mask & AE_READABLE) {
-	int fd = fable_get_fd(sfd);
+	int r;
+	int fd = fable_get_fd_read(sfd, &r);
 	assert(fd < AE_SETSIZE);
 	aeFileEvent *fe = &eventLoop->events[fd];
 
-	if (aeApiAddEvent(eventLoop, fd, mask) == -1)
+	if (aeApiAddEvent(eventLoop, fd, r ? AE_READABLE : AE_WRITABLE) == -1)
 	    abort();
 	fe->mask |= AE_READABLE;
 	fe->rfileProc = proc;
