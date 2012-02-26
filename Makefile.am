@@ -22,8 +22,6 @@ memcached_SOURCES = memcached.c memcached.h \
 		    libevent/signal.c \
 		    libevent/evutil.c \
 		    libevent/epoll.c \
-		    libevent/poll.c \
-		    libevent/select.c \
 		    fable/fable_tcp.c
 
 if BUILD_CACHE

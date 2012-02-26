@@ -52,15 +52,11 @@
 #include "evutil.h"
 #include "log.h"
 
-extern const struct eventop selectops;
-extern const struct eventop pollops;
 extern const struct eventop epollops;
 
 /* In order of preference */
 static const struct eventop *eventops[] = {
 	&epollops,
-	&pollops,
-	&selectops,
 	NULL
 };
 
