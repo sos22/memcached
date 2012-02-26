@@ -24,6 +24,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#define _GNU_SOURCE
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -37,13 +38,9 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
-#ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
 #include <fcntl.h>
-#ifdef HAVE_STDLIB_H
 #include <stdlib.h>
-#endif
 #include <errno.h>
 #if defined WIN32 && !defined(HAVE_GETTIMEOFDAY_H)
 #include <sys/timeb.h>

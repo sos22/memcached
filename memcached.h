@@ -21,6 +21,9 @@
 #include "cache.h"
 #include "libevent/event.h"
 
+#define FABLE_TYPE tcp
+#include "fable/fable.h"
+
 struct fable_handle;
 
 #include "sasl_defs.h"
@@ -368,7 +371,7 @@ struct conn {
     sasl_conn_t *sasl_conn;
     enum conn_states  state;
     enum bin_substates substate;
-    struct event event;
+    struct fable_event event;
     short  ev_flags;
     short  which;   /** which events were just triggered */
 

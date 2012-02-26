@@ -1,7 +1,8 @@
 #define _GNU_SOURCE
 
-#define FABLE_TYPE tcp
+#include "../libevent/event.h"
 
+#define FABLE_TYPE tcp
 #include "fable.h"
 
 #include <sys/types.h>
@@ -351,4 +352,41 @@ void fable_abandon_write_buf_tcp(UNUSED_PARAMETER struct fable_handle *handle,
 				 struct fable_buf *buf)
 {
   free(buf);
+}
+
+
+/* libevent integration */
+static void libevent_event_handler(int fd, short which, void *ctxt)
+{
+  struct fable_event *evt = ctxt;
+  evt->handler(evt->handle, which, evt->ctxt);
+}
+
+void fable_add_event(struct fable_event *evt,
+		     struct event_base *base,
+		     struct fable_handle *handle,
+		     short event_flags,
+		     void (*handler)(struct fable_handle *handle,
+				     short which, void *ctxt),
+		     void *ctxt)
+{
+  evt->handle = handle;
+  evt->handler = handler;
+  evt->ctxt = ctxt;
+  event_set(&evt->event, fable_get_fd(handle), event_flags, libevent_event_handler, evt);
+  event_base_set(base, &evt->event);
+
+  if (event_add(&evt->event, 0) == -1)
+    abort();
+}
+
+void fable_event_del(struct fable_event *evt)
+{
+  event_del(&evt->event);
+}
+
+void fable_event_change_flags(struct fable_event *evt, short flags)
+{
+  event_del(&evt->event);
+  fable_add_event(evt, evt->event.ev_base, evt->handle, flags, evt->handler, evt->ctxt);
 }

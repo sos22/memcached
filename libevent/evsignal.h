@@ -27,6 +27,8 @@
 #ifndef _EVSIGNAL_H_
 #define _EVSIGNAL_H_
 
+#include <signal.h>
+
 typedef void (*ev_sighandler_t)(int);
 
 struct evsignal_info {

@@ -24,6 +24,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#define _GNU_SOURCE
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -965,12 +966,6 @@ event_queue_insert(struct event_base *base, struct event *ev, int queue)
 }
 
 /* Functions for debugging */
-
-const char *
-event_get_version(void)
-{
-	return (VERSION);
-}
 
 /* 
  * No thread-safe interface needed - the information should be the same

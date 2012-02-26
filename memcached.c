@@ -86,7 +86,7 @@ static void process_stat_settings(ADD_STAT add_stats, void *c);
 static void settings_init(void);
 
 /* event handling, network IO */
-static void event_handler(const int fd, const short which, void *arg);
+static void event_handler(struct fable_handle *fd, const short which, void *arg);
 static void conn_close(conn *c);
 static void conn_init(void);
 static bool update_event(conn *c, const int new_flags);
@@ -444,17 +444,8 @@ conn *conn_new(struct fable_handle *sfd,
 
     c->noreply = false;
 
-    event_set(&c->event, fable_get_fd(sfd), event_flags, event_handler, (void *)c);
-    event_base_set(base, &c->event);
     c->ev_flags = event_flags;
-
-    if (event_add(&c->event, 0) == -1) {
-        if (conn_add_to_freelist(c)) {
-            conn_free(c);
-        }
-        perror("event_add");
-        return NULL;
-    }
+    fable_add_event(&c->event, base, sfd, event_flags, event_handler, (void *)c);
 
     STATS_LOCK();
     stats.curr_conns++;
@@ -530,7 +521,7 @@ static void conn_close(conn *c) {
     assert(c != NULL);
 
     /* delete the event, the socket and the conn */
-    event_del(&c->event);
+    fable_event_del(&c->event);
 
     if (settings.verbose > 1)
         fprintf(stderr, "<%s connection closed.\n", fable_handle_name(c->sfd));
@@ -3623,14 +3614,10 @@ static enum try_read_result try_read_network(conn *c) {
 static bool update_event(conn *c, const int new_flags) {
     assert(c != NULL);
 
-    struct event_base *base = c->event.ev_base;
     if (c->ev_flags == new_flags)
         return true;
-    if (event_del(&c->event) == -1) return false;
-    event_set(&c->event, fable_get_fd(c->sfd), new_flags, event_handler, (void *)c);
-    event_base_set(base, &c->event);
+    fable_event_change_flags(&c->event, new_flags);
     c->ev_flags = new_flags;
-    if (event_add(&c->event, 0) == -1) return false;
     return true;
 }
 
@@ -4033,21 +4020,13 @@ static void drive_machine(conn *c) {
     return;
 }
 
-void event_handler(const int fd, const short which, void *arg) {
+void event_handler(struct fable_handle *fd, const short which, void *arg) {
     conn *c;
 
     c = (conn *)arg;
     assert(c != NULL);
 
     c->which = which;
-
-    /* sanity */
-    if (fd != fable_get_fd(c->sfd)) {
-        if (settings.verbose > 0)
-            fprintf(stderr, "Catastrophic: event fd doesn't match conn fd!\n");
-        conn_close(c);
-        return;
-    }
 
     drive_machine(c);
 

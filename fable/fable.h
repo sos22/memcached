@@ -137,4 +137,23 @@ static inline ssize_t fable_blocking_sendmsg(struct fable_handle *handle, const 
   return res;
 }
 
+#ifdef _EVENT_H_
+struct fable_event {
+  struct event event;
+  struct fable_handle *handle;
+  void (*handler)(struct fable_handle *, short, void *);
+  void *ctxt;
+};
+void fable_add_event(struct fable_event *evt,
+		     struct event_base *base,
+		     struct fable_handle *handle,
+		     short event_flags,
+		     void (*handler)(struct fable_handle *handle,
+				     short which, void *ctxt),
+		     void *ctxt);
+void fable_event_del(struct fable_event *evt);
+void fable_event_change_flags(struct fable_event *evt, short flags);
+
+#endif
+
 #endif
