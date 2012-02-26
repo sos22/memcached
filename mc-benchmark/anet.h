@@ -39,8 +39,5 @@
 #define ANET_ERR_LEN 256
 
 struct fable_handle *anetTcpNonBlockConnect(char *err, char *addr);
-int anetRead(int fd, char *buf, int count);
-int anetWrite(int fd, char *buf, int count);
-int anetTcpNoDelay(char *err, struct fable_handle *fd);
 
 #endif

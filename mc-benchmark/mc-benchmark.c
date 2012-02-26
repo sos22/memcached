@@ -322,7 +322,6 @@ static client createClient(void) {
         fprintf(stderr,"Connect: %s\n",err);
         return NULL;
     }
-    anetTcpNoDelay(NULL,c->fd);
     c->obuf = sdsempty();
     c->ibuf = sdsempty();
     c->mbulk = -1;

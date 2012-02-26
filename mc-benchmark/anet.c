@@ -55,17 +55,6 @@ static void anetSetError(char *err, const char *fmt, ...)
     va_end(ap);
 }
 
-int anetTcpNoDelay(char *err, struct fable_handle *fd)
-{
-    int yes = 1;
-    if (setsockopt(fable_get_fd(fd), IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) == -1)
-    {
-        anetSetError(err, "setsockopt TCP_NODELAY: %s\n", strerror(errno));
-        return ANET_ERR;
-    }
-    return ANET_OK;
-}
-
 struct fable_handle *anetTcpNonBlockConnect(char *err, char *addr)
 {
     struct fable_handle *res;
