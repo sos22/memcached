@@ -86,7 +86,7 @@ struct fable_handle;
 					struct fable_buf* buf);		\
   void fable_close_ ## name (struct fable_handle *handle);		\
   const char *fable_handle_name_ ## name (struct fable_handle *handle);	\
-  int fable_get_fd_ ## name(struct fable_handle *handle)
+  int fable_get_fd_ ## name(struct fable_handle *handle)		\
 
 fable_mk_methods(unixdomain);
 fable_mk_methods(tcp);
@@ -98,6 +98,7 @@ struct msghdr;
 
 #define fable_blocking_read fable_lend_read_buf
 
+#ifdef FABLE_TYPE
 static inline ssize_t fable_blocking_write(struct fable_handle *handle, const void *buf, size_t bufsize)
 {
   struct fable_buf *fbuf = fable_lend_write_buf(handle, buf, bufsize);
@@ -136,6 +137,7 @@ static inline ssize_t fable_blocking_sendmsg(struct fable_handle *handle, const 
   }
   return res;
 }
+#endif
 
 #ifdef _EVENT_H_
 struct fable_event {

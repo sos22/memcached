@@ -9,7 +9,7 @@ ifeq ($(uname_S),SunOS)
   CCLINK?= -ldl -lnsl -lsocket -lm
 else
   CFLAGS?= -std=c99 $(OPTIMIZATION) -Wall -W $(ARCH) $(PROF)
-  CCLINK?= -lm
+  CCLINK?= -lm -lrt
 endif
 CCOPT= $(CFLAGS) $(CCLINK) $(ARCH) $(PROF)
 DEBUG?= -g -rdynamic -ggdb 
@@ -20,6 +20,7 @@ INSTALL= cp -p
 
 BENCHOBJ = ae.o anet.o mc-benchmark.o sds.o adlist.o zmalloc.o fable_tcp.o
 BENCHOBJ += ../libevent/event.o ../libevent/log.o ../libevent/signal.o ../libevent/evutil.o ../libevent/epoll.o
+BENCHOBJ += ../fable/fable_shmem_pipe.o ../fable/fable_unixdomain.o ../fable/io_helpers.o
 
 BENCHPRGNAME = mc-benchmark
 
@@ -40,5 +41,3 @@ dep:
 bench:
 	./mc-benchmark
 
-fable_tcp.o: ../fable/fable_tcp.c
-	$(CC) -c $(CFLAGS) $(DEBUG) $(COMPILE_TIME) $<

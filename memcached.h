@@ -362,6 +362,13 @@ typedef struct {
     struct event_base *base;    /* libevent handle this thread uses */
 } LIBEVENT_DISPATCHER_THREAD;
 
+struct fable_event {
+    struct event_base *ev_base;
+    int have_recv, have_send;
+    struct event recv;
+    struct event send;
+};
+
 /**
  * The structure representing a connection into memcached.
  */
