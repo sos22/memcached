@@ -30,6 +30,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <assert.h>
 #include <stdio.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -71,38 +72,73 @@ void aeStop(aeEventLoop *eventLoop) {
 int aeCreateFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask,
 		      aeFileProc *proc, void *clientData)
 {
-    int fd = fable_get_fd(sfd);
-    if (fd >= AE_SETSIZE) return AE_ERR;
-    aeFileEvent *fe = &eventLoop->events[fd];
+    if (mask & AE_READABLE) {
+	int fd = fable_get_fd(sfd);
+	assert(fd < AE_SETSIZE);
+	aeFileEvent *fe = &eventLoop->events[fd];
 
-    if (aeApiAddEvent(eventLoop, fd, mask) == -1)
-        return AE_ERR;
-    fe->mask |= mask;
-    if (mask & AE_READABLE) fe->rfileProc = proc;
-    if (mask & AE_WRITABLE) fe->wfileProc = proc;
-    fe->clientData = clientData;
-    if (fd > eventLoop->maxfd)
-        eventLoop->maxfd = fd;
+	if (aeApiAddEvent(eventLoop, fd, mask) == -1)
+	    abort();
+	fe->mask |= AE_READABLE;
+	fe->rfileProc = proc;
+	fe->clientData = clientData;
+	if (fd > eventLoop->maxfd)
+	    eventLoop->maxfd = fd;
+    }
+    if (mask & AE_WRITABLE) {
+	int fd = fable_get_fd(sfd);
+	assert(fd < AE_SETSIZE);
+	aeFileEvent *fe = &eventLoop->events[fd];
+
+	if (aeApiAddEvent(eventLoop, fd, mask) == -1)
+	    abort();
+	fe->mask |= AE_WRITABLE;
+	fe->wfileProc = proc;
+	fe->clientData = clientData;
+	if (fd > eventLoop->maxfd)
+	    eventLoop->maxfd = fd;
+    }
     return AE_OK;
 }
 
 void aeDeleteFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask)
 {
-    int fd = fable_get_fd(sfd);
-    if (fd >= AE_SETSIZE) return;
-    aeFileEvent *fe = &eventLoop->events[fd];
+    if (mask & AE_READABLE) {
+	int fd = fable_get_fd(sfd);
+	aeFileEvent *fe = &eventLoop->events[fd];
 
-    if (fe->mask == AE_NONE) return;
-    fe->mask = fe->mask & (~mask);
-    if (fd == eventLoop->maxfd && fe->mask == AE_NONE) {
-        /* Update the max fd */
-        int j;
+	if (fe->mask & AE_READABLE) {
+	    fe->mask = fe->mask & (~AE_READABLE);
+	    if (fd == eventLoop->maxfd &&
+		fe->mask == AE_NONE) {
+		/* Update the max fd */
+		int j;
 
-        for (j = eventLoop->maxfd-1; j >= 0; j--)
-            if (eventLoop->events[j].mask != AE_NONE) break;
-        eventLoop->maxfd = j;
+		for (j = eventLoop->maxfd-1; j >= 0; j--)
+		    if (eventLoop->events[j].mask != AE_NONE) break;
+		eventLoop->maxfd = j;
+	    }
+	    aeApiDelEvent(eventLoop, fd, AE_READABLE);
+	}
     }
-    aeApiDelEvent(eventLoop, fd, mask);
+    if (mask & AE_WRITABLE) {
+	int fd = fable_get_fd(sfd);
+	aeFileEvent *fe = &eventLoop->events[fd];
+
+	if (fe->mask & AE_WRITABLE) {
+	    fe->mask = fe->mask & (~AE_WRITABLE);
+	    if (fd == eventLoop->maxfd &&
+		fe->mask == AE_NONE) {
+		/* Update the max fd */
+		int j;
+
+		for (j = eventLoop->maxfd-1; j >= 0; j--)
+		    if (eventLoop->events[j].mask != AE_NONE) break;
+		eventLoop->maxfd = j;
+	    }
+	    aeApiDelEvent(eventLoop, fd, AE_WRITABLE);
+	}
+    }
 }
 
 static void aeGetTime(long *seconds, long *milliseconds)

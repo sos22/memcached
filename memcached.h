@@ -359,6 +359,13 @@ typedef struct {
     struct event_base *base;    /* libevent handle this thread uses */
 } LIBEVENT_DISPATCHER_THREAD;
 
+struct fable_event {
+    struct event_base *ev_base;
+    int have_recv, have_send;
+    struct event recv;
+    struct event send;
+};
+
 /**
  * The structure representing a connection into memcached.
  */
@@ -368,7 +375,7 @@ struct conn {
     sasl_conn_t *sasl_conn;
     enum conn_states  state;
     enum bin_substates substate;
-    struct event event;
+    struct fable_event event;
     short  ev_flags;
     short  which;   /** which events were just triggered */
 

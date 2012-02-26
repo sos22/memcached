@@ -346,6 +346,50 @@ static const char *prot_text(enum protocol prot) {
     return rv;
 }
 
+static void fable_event_set(struct fable_event *evt,
+			    struct fable_handle *handle,
+			    short event,
+			    void (*fn)(int, short, void *),
+			    void *arg)
+{
+    evt->have_recv = evt->have_send = 0;
+    if (event & EV_READ) {
+	event_set(&evt->recv, fable_get_fd(handle), event, fn, arg);
+	evt->have_recv = 1;
+    }
+    if (event & EV_WRITE) {
+	event_set(&evt->send, fable_get_fd(handle), event, fn, arg);
+	evt->have_send = 1;
+    }
+}
+
+static void fable_event_base_set(struct event_base *base, struct fable_event *evt)
+{
+    evt->ev_base = base;
+    if (evt->have_recv)
+	event_base_set(base, &evt->recv);
+    if (evt->have_send)
+	event_base_set(base, &evt->send);
+}
+
+static int fable_event_add(struct fable_event *evt, struct timeval *tv)
+{
+    if (evt->have_recv)
+	event_add(&evt->recv, tv);
+    if (evt->have_send)
+	event_add(&evt->send, tv);
+    return 0;
+}
+
+static int fable_event_del(struct fable_event *evt)
+{
+    if (evt->have_recv)
+	event_del(&evt->recv);
+    if (evt->have_send)
+	event_del(&evt->send);
+    return 0;
+}
+
 conn *conn_new(struct fable_handle *sfd,
                enum conn_states init_state,
                const int event_flags,
@@ -444,11 +488,11 @@ conn *conn_new(struct fable_handle *sfd,
 
     c->noreply = false;
 
-    event_set(&c->event, fable_get_fd(sfd), event_flags, event_handler, (void *)c);
-    event_base_set(base, &c->event);
+    fable_event_set(&c->event, sfd, event_flags, event_handler, (void *)c);
+    fable_event_base_set(base, &c->event);
     c->ev_flags = event_flags;
 
-    if (event_add(&c->event, 0) == -1) {
+    if (fable_event_add(&c->event, 0) == -1) {
         if (conn_add_to_freelist(c)) {
             conn_free(c);
         }
@@ -530,7 +574,7 @@ static void conn_close(conn *c) {
     assert(c != NULL);
 
     /* delete the event, the socket and the conn */
-    event_del(&c->event);
+    fable_event_del(&c->event);
 
     if (settings.verbose > 1)
         fprintf(stderr, "<%s connection closed.\n", fable_handle_name(c->sfd));
@@ -3626,11 +3670,11 @@ static bool update_event(conn *c, const int new_flags) {
     struct event_base *base = c->event.ev_base;
     if (c->ev_flags == new_flags)
         return true;
-    if (event_del(&c->event) == -1) return false;
-    event_set(&c->event, fable_get_fd(c->sfd), new_flags, event_handler, (void *)c);
-    event_base_set(base, &c->event);
+    if (fable_event_del(&c->event) == -1) return false;
+    fable_event_set(&c->event, c->sfd, new_flags, event_handler, (void *)c);
+    fable_event_base_set(base, &c->event);
     c->ev_flags = new_flags;
-    if (event_add(&c->event, 0) == -1) return false;
+    if (fable_event_add(&c->event, 0) == -1) return false;
     return true;
 }
 
@@ -4040,14 +4084,6 @@ void event_handler(const int fd, const short which, void *arg) {
     assert(c != NULL);
 
     c->which = which;
-
-    /* sanity */
-    if (fd != fable_get_fd(c->sfd)) {
-        if (settings.verbose > 0)
-            fprintf(stderr, "Catastrophic: event fd doesn't match conn fd!\n");
-        conn_close(c);
-        return;
-    }
 
     drive_machine(c);
 

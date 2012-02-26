@@ -86,7 +86,7 @@ struct fable_handle;
 					struct fable_buf* buf);		\
   void fable_close_ ## name (struct fable_handle *handle);		\
   const char *fable_handle_name_ ## name (struct fable_handle *handle);	\
-  int fable_get_fd_ ## name(struct fable_handle *handle)
+  int fable_get_fd_ ## name(struct fable_handle *handle)		\
 
 fable_mk_methods(unixdomain);
 fable_mk_methods(tcp);
