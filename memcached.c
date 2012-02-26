@@ -1,5 +1,3 @@
-#define FABLE_TYPE tcp
-
 /* -*- Mode: C; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
 /*
  *  memcached - memory caching daemon
@@ -128,7 +126,7 @@ static enum transmit_result transmit(conn *c);
  */
 static volatile bool allow_new_conns = true;
 static struct event maxconnsevent;
-static void maxconns_handler(const int fd, const short which, void *arg) {
+static void maxconns_handler(int fd, const short which, void *arg) {
     struct timeval t = {.tv_sec = 0, .tv_usec = 10000};
 
     if (fd == -42 || allow_new_conns == false) {
@@ -4087,7 +4085,7 @@ static struct event clockevent;
  * from jitter, simply ticking our internal timer here is accurate enough.
  * Note that users who are setting explicit dates for expiration times *must*
  * ensure their clocks are correct before starting memcached. */
-static void clock_handler(const int fd, const short which, void *arg) {
+static void clock_handler(int fd, const short which, void *arg) {
     struct timeval t = {.tv_sec = 1, .tv_usec = 0};
     static bool initialized = false;
 #if defined(HAVE_CLOCK_GETTIME) && defined(CLOCK_MONOTONIC)

@@ -237,7 +237,7 @@ struct event {
 struct event;
 #endif
 
-#define EVENT_SIGNAL(ev)	(int)(ev)->ev_fd
+#define EVENT_SIGNAL(ev)	(int)(long)(ev)->ev_fd
 
 #ifdef _EVENT_DEFINED_TQENTRY
 #undef TAILQ_ENTRY
@@ -531,7 +531,7 @@ int event_base_loopbreak(struct event_base *);
   @see event_add(), event_del(), event_once()
 
  */
-void event_set(struct event *, int, short, void (*)(int, short, void *), void *);
+void event_set(struct event *, int fd, short, void (*)(int, short, void *), void *);
 
 /**
   Schedule a one-time event to occur.
@@ -551,7 +551,7 @@ void event_set(struct event *, int, short, void (*)(int, short, void *), void *)
   @see event_set()
 
  */
-int event_once(int, short, void (*)(int, short, void *), void *,
+int event_once(int fd, short, void (*)(int, short, void *), void *,
     const struct timeval *);
 
 

@@ -21,7 +21,7 @@
 #include "cache.h"
 #include "libevent/event.h"
 
-#define FABLE_TYPE tcp
+#define FABLE_TYPE shmem_pipe
 #include "fable/fable.h"
 
 struct fable_handle;
@@ -361,13 +361,6 @@ typedef struct {
     pthread_t thread_id;        /* unique ID of this thread */
     struct event_base *base;    /* libevent handle this thread uses */
 } LIBEVENT_DISPATCHER_THREAD;
-
-struct fable_event {
-    struct event_base *ev_base;
-    int have_recv, have_send;
-    struct event recv;
-    struct event send;
-};
 
 /**
  * The structure representing a connection into memcached.

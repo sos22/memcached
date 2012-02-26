@@ -1,3 +1,4 @@
+#define FABLE_TYPE shmem_pipe
 
 #ifndef FABLE_H
 #define FABLE_H
@@ -93,6 +94,8 @@ fable_mk_methods(tcp);
 fable_mk_methods(shmem_pipe);
 
 #undef fable_mk_methods
+
+struct fable_handle *fable_wrap_fd(int fd, int direction);
 
 struct msghdr;
 

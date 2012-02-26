@@ -25,6 +25,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #define _GNU_SOURCE
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -349,7 +350,7 @@ event_process_active(struct event_base *base)
 		while (ncalls) {
 			ncalls--;
 			ev->ev_ncalls = ncalls;
-			(*ev->ev_callback)((int)ev->ev_fd, ev->ev_res, ev->ev_arg);
+			(*ev->ev_callback)(ev->ev_fd, ev->ev_res, ev->ev_arg);
 			if (event_gotsig || base->event_break)
 				return;
 		}
@@ -520,7 +521,7 @@ event_base_loop(struct event_base *base, int flags)
 struct event_once {
 	struct event ev;
 
-	void (*cb)(int, short, void *);
+	void (*cb)(int , short, void *);
 	void *arg;
 };
 
@@ -537,8 +538,8 @@ event_once_cb(int fd, short events, void *arg)
 
 /* not threadsafe, event scheduled once. */
 int
-event_once(int fd, short events,
-    void (*callback)(int, short, void *), void *arg, const struct timeval *tv)
+event_once(int  fd, short events,
+    void (*callback)(int , short, void *), void *arg, const struct timeval *tv)
 {
 	return event_base_once(current_base, fd, events, callback, arg, tv);
 }
@@ -546,7 +547,7 @@ event_once(int fd, short events,
 /* Schedules an event once */
 int
 event_base_once(struct event_base *base, int fd, short events,
-    void (*callback)(int, short, void *), void *arg, const struct timeval *tv)
+		void (*callback)(int , short, void *), void *arg, const struct timeval *tv)
 {
 	struct event_once *eonce;
 	struct timeval etv;
@@ -592,7 +593,7 @@ event_base_once(struct event_base *base, int fd, short events,
 
 void
 event_set(struct event *ev, int fd, short events,
-	  void (*callback)(int, short, void *), void *arg)
+	  void (*callback)(int , short, void *), void *arg)
 {
 	/* Take the current base - caller needs to set the real base later */
 	ev->ev_base = current_base;
@@ -966,6 +967,12 @@ event_queue_insert(struct event_base *base, struct event *ev, int queue)
 }
 
 /* Functions for debugging */
+
+const char *
+event_get_version(void)
+{
+	return "hacked up version of libevent";
+}
 
 /* 
  * No thread-safe interface needed - the information should be the same

@@ -47,9 +47,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef HAVE_UNISTD_H
 #include <unistd.h>
-#endif
 #include <errno.h>
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
@@ -68,8 +66,9 @@ static void evsignal_handler(int sig);
 
 /* Callback for when the signal handler write a byte to our signaling socket */
 static void
-evsignal_cb(int fd, short what, void *arg)
+evsignal_cb(int _fd, short what, void *arg)
 {
+	int fd = (int)(long)_fd;
 	static char signals[1];
 #ifdef WIN32
 	SSIZE_T n;
@@ -125,7 +124,7 @@ evsignal_init(struct event_base *base)
 
         evutil_make_socket_nonblocking(base->sig.ev_signal_pair[0]);
 
-	event_set(&base->sig.ev_signal, base->sig.ev_signal_pair[1],
+	event_set(&base->sig.ev_signal, (int )(long)base->sig.ev_signal_pair[1],
 		EV_READ | EV_PERSIST, evsignal_cb, &base->sig.ev_signal);
 	base->sig.ev_signal.ev_base = base;
 	base->sig.ev_signal.ev_flags |= EVLIST_INTERNAL;

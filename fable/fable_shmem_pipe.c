@@ -24,6 +24,8 @@
 #include <errno.h>
 #include <math.h>
 
+#include "../libevent/event.h"
+
 #include "fable.h"
 #include "io_helpers.h"
 
@@ -970,4 +972,34 @@ void fable_abandon_write_buf_shmem_pipe(struct fable_handle *handle, struct fabl
   unsigned long offset = ((char*)fbuf->bufs[0].iov_base) - ((char*)sp->ring);
   release_shared_space(sp, offset, fbuf->bufs[0].iov_len);
   free(fbuf);
+}
+
+void fable_add_event(struct fable_event *evt,
+		     struct event_base *base,
+		     struct fable_handle *handle,
+		     short event_flags,
+		     void (*handle)(struct fable_handle *handle,
+				    short which, void *ctxt),
+		     void *ctxt)
+{
+  evt->handle = handle;
+  evt->handler = handler;
+  evt->ctxt = ctxt;
+
+  event_set(&evt->recv_event, fable_get_fd(handle, SIMPLEX_RECV),
+	    EV_PERSIST|EV_READ, libevent_recv_handler, evt);
+  event_base_set(base, &evt->recv_event);
+
+  /* Note that we look for EV_READ even on the send channel! The FD
+     here is the aux data socket, so we can read that when the other
+     end has sent us something. */
+  event_set(&evt->send_event, fable_get_fd(handle, SIMPLEX_SEND),
+	    EV_PERSIST|EV_READ, libevent_recv_handler, evt);
+  event_base_set(base, &evt->send_event);
+
+  if (event_flags & EV_READ) {
+    
+  }
+  if (event_add(&evt->event, 0) == -1)
+    abort();
 }
