@@ -56,8 +56,7 @@ struct fable_handle;
   void fable_init_ ## name (void);					\
   struct fable_handle* fable_connect_ ## name (const char* _name,	\
 					       int direction);		\
-  struct fable_handle* fable_listen_ ## name (const char *interface,	\
-					      const char* _name);	\
+  struct fable_handle* fable_listen_ ## name (const char *_name);	\
   struct fable_handle* fable_accept_ ## name (struct fable_handle *listen_handle, \
 					      int direction);		\
   void fable_set_nonblocking_ ## name (struct fable_handle* handle);	\

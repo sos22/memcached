@@ -55,24 +55,6 @@ static void anetSetError(char *err, const char *fmt, ...)
     va_end(ap);
 }
 
-int anetNonBlock(char *err, int fd)
-{
-    int flags;
-
-    /* Set the socket nonblocking.
-     * Note that fcntl(2) for F_GETFL and F_SETFL can't be
-     * interrupted by a signal. */
-    if ((flags = fcntl(fd, F_GETFL)) == -1) {
-        anetSetError(err, "fcntl(F_GETFL): %s\n", strerror(errno));
-        return ANET_ERR;
-    }
-    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-        anetSetError(err, "fcntl(F_SETFL,O_NONBLOCK): %s\n", strerror(errno));
-        return ANET_ERR;
-    }
-    return ANET_OK;
-}
-
 int anetTcpNoDelay(char *err, struct fable_handle *fd)
 {
     int yes = 1;
@@ -84,32 +66,11 @@ int anetTcpNoDelay(char *err, struct fable_handle *fd)
     return ANET_OK;
 }
 
-int anetResolve(char *err, char *host, char *ipbuf)
+struct fable_handle *anetTcpNonBlockConnect(char *err, char *addr)
 {
-    struct sockaddr_in sa;
-
-    sa.sin_family = AF_INET;
-    if (inet_aton(host, &sa.sin_addr) == 0) {
-        struct hostent *he;
-
-        he = gethostbyname(host);
-        if (he == NULL) {
-            anetSetError(err, "can't resolve: %s\n", host);
-            return ANET_ERR;
-        }
-        memcpy(&sa.sin_addr, he->h_addr, sizeof(struct in_addr));
-    }
-    strcpy(ipbuf,inet_ntoa(sa.sin_addr));
-    return ANET_OK;
-}
-
-struct fable_handle *anetTcpNonBlockConnect(char *err, char *addr, int port)
-{
-    char buf[4096];
     struct fable_handle *res;
-    sprintf(buf, "%s:%d", addr, port);
-    res = fable_connect(buf, FABLE_DIRECTION_DUPLEX);
+    res = fable_connect(addr, FABLE_DIRECTION_DUPLEX);
     if (!res)
-      anetSetError(err, "cannot connect to %s: %s", buf, strerror(errno));
+      anetSetError(err, "cannot connect to %s: %s", addr, strerror(errno));
     return res;
 }

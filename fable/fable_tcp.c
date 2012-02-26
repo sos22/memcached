@@ -85,20 +85,34 @@ struct fable_handle *fable_connect_tcp(const char* name, int UNUSED_PARAMETER di
   return (struct fable_handle *)handle;
 }
 
-struct fable_handle *fable_listen_tcp(const char *interface, const char *service)
+struct fable_handle *fable_listen_tcp(const char *service)
 {
   struct addrinfo hints;
   struct addrinfo *ai;
   int e;
   int listen_fd;
   struct fable_handle_listen_tcp *handle;
+  const char *port_name;
+  char *host_name;
+
+  port_name = strrchr(service, ':');
+  if (port_name) {
+    port_name = port_name + 1;
+    host_name = malloc(port_name - service);
+    memcpy(host_name, service, port_name - service - 1);
+    host_name[port_name - service - 1] = 0;
+  } else {
+    port_name = service;
+    host_name = NULL;
+  }
 
   memset(&hints, 0, sizeof(hints));
   hints.ai_flags = AI_PASSIVE;
-  hints.ai_family = AF_UNSPEC;
+  hints.ai_family = AF_INET;
   hints.ai_socktype = SOCK_STREAM;
 
-  e = getaddrinfo(interface, service, &hints, &ai);
+  e = getaddrinfo(host_name, port_name, &hints, &ai);
+  free(host_name);
   if (e != 0) {
     errno = e; /* XXX */
     return NULL;

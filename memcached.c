@@ -203,17 +203,12 @@ static void stats_reset(void) {
 
 static void settings_init(void) {
     settings.use_cas = true;
-    settings.access = 0700;
-    settings.port = 11211;
-    settings.udpport = 11211;
-    /* By default this string should be NULL for getaddrinfo() */
-    settings.inter = NULL;
+    settings.port = "localhost:11211";
     settings.maxbytes = 64 * 1024 * 1024; /* default is 64MB */
     settings.maxconns = 1024;         /* to limit connections-related memory to about 5MB */
     settings.verbose = 0;
     settings.oldest_live = 0;
     settings.evict_to_free = 1;       /* push old items out of cache when memory runs out */
-    settings.socketpath = NULL;       /* by default, not using a unix socket */
     settings.factor = 1.25;
     settings.chunk_size = 48;         /* space for a modest key and value */
     settings.num_threads = 4;         /* N workers */
@@ -403,14 +398,7 @@ conn *conn_new(struct fable_handle *sfd,
     c->transport = transport;
     c->protocol = settings.binding_protocol;
 
-    /* unix socket mode doesn't need this, so zeroed out.  but why
-     * is this done for every command?  presumably for UDP
-     * mode.  */
-    if (!settings.socketpath) {
-        c->request_addr_size = sizeof(c->request_addr);
-    } else {
-        c->request_addr_size = 0;
-    }
+    c->request_addr_size = sizeof(c->request_addr);
 
     if (settings.verbose > 1) {
         if (init_state == conn_listening) {
@@ -2606,15 +2594,10 @@ static void process_stat_settings(ADD_STAT add_stats, void *c) {
     assert(add_stats);
     APPEND_STAT("maxbytes", "%u", (unsigned int)settings.maxbytes);
     APPEND_STAT("maxconns", "%d", settings.maxconns);
-    APPEND_STAT("tcpport", "%d", settings.port);
-    APPEND_STAT("udpport", "%d", settings.udpport);
-    APPEND_STAT("inter", "%s", settings.inter ? settings.inter : "NULL");
+    APPEND_STAT("tcpport", "%s", settings.port);
     APPEND_STAT("verbosity", "%d", settings.verbose);
     APPEND_STAT("oldest", "%lu", (unsigned long)settings.oldest_live);
     APPEND_STAT("evictions", "%s", settings.evict_to_free ? "on" : "off");
-    APPEND_STAT("domain_socket", "%s",
-                settings.socketpath ? settings.socketpath : "NULL");
-    APPEND_STAT("umask", "%o", settings.access);
     APPEND_STAT("growth_factor", "%.2f", settings.factor);
     APPEND_STAT("chunk_size", "%d", settings.chunk_size);
     APPEND_STAT("num_threads", "%d", settings.num_threads);
@@ -4081,22 +4064,16 @@ void event_handler(const int fd, const short which, void *arg) {
  *        when they are successfully added to the list of ports we
  *        listen on.
  */
-static int server_socket(const char *interface,
-                         int port,
+static int server_socket(const char *where,
                          enum network_transport transport,
                          FILE *portnumber_file)
 {
-    char port_buf[NI_MAXSERV];
     struct fable_handle *sfd;
     conn *listen_conn_add;
 
     assert(transport == tcp_transport);
 
-    if (port == -1) {
-        port = 0;
-    }
-    snprintf(port_buf, sizeof(port_buf), "%d", port);
-    sfd = fable_listen_tcp(interface, port_buf);
+    sfd = fable_listen_tcp(where);
 
     if (!(listen_conn_add = conn_new(sfd, conn_listening,
                                      EV_READ | EV_PERSIST, 1,
@@ -4110,41 +4087,10 @@ static int server_socket(const char *interface,
     return 0;
 }
 
-static int server_sockets(int port, enum network_transport transport,
+static int server_sockets(const char *name,
+			  enum network_transport transport,
                           FILE *portnumber_file) {
-    if (settings.inter == NULL) {
-        return server_socket(settings.inter, port, transport, portnumber_file);
-    } else {
-        // tokenize them and bind to each one of them..
-        char *b;
-        int ret = 0;
-        char *list = strdup(settings.inter);
-
-        if (list == NULL) {
-            fprintf(stderr, "Failed to allocate memory for parsing server interface string\n");
-            return 1;
-        }
-        for (char *p = strtok_r(list, ";,", &b);
-             p != NULL;
-             p = strtok_r(NULL, ";,", &b)) {
-            int the_port = port;
-            char *s = strchr(p, ':');
-            if (s != NULL) {
-                *s = '\0';
-                ++s;
-                if (!safe_strtol(s, &the_port)) {
-                    fprintf(stderr, "Invalid port number: \"%s\"", s);
-                    return 1;
-                }
-            }
-            if (strcmp(p, "*") == 0) {
-                p = NULL;
-            }
-            ret |= server_socket(p, the_port, transport, portnumber_file);
-        }
-        free(list);
-        return ret;
-    }
+    return server_socket(name, transport, portnumber_file);
 }
 
 /*
@@ -4480,7 +4426,6 @@ int main (int argc, char **argv) {
     static int *u_socket = NULL;
     bool protocol_specified = false;
     bool tcp_specified = false;
-    bool udp_specified = false;
 
     char *subopts;
     char *subopts_value;
@@ -4513,10 +4458,7 @@ int main (int argc, char **argv) {
 
     /* process arguments */
     while (-1 != (c = getopt(argc, argv,
-          "a:"  /* access mask for unix socket */
           "p:"  /* TCP port number to listen on */
-          "s:"  /* unix socket path to listen on */
-          "U:"  /* UDP port number to listen on */
           "m:"  /* max memory to use for items in megabytes */
           "M"   /* return error on memory exhausted */
           "c:"  /* max simultaneous connections */
@@ -4525,7 +4467,6 @@ int main (int argc, char **argv) {
           "r"   /* maximize core file limit */
           "v"   /* verbose */
           "d"   /* daemon mode */
-          "l:"  /* interface to listen on */
           "u:"  /* user identity to run as */
           "P:"  /* save PID in file */
           "f:"  /* factor? */
@@ -4542,21 +4483,9 @@ int main (int argc, char **argv) {
           "o:"  /* Extended generic options */
         ))) {
         switch (c) {
-        case 'a':
-            /* access for unix domain socket, as octal mask (like chmod)*/
-            settings.access= strtol(optarg,NULL,8);
-            break;
-
-        case 'U':
-            settings.udpport = atoi(optarg);
-            udp_specified = true;
-            break;
         case 'p':
-            settings.port = atoi(optarg);
+            settings.port = optarg;
             tcp_specified = true;
-            break;
-        case 's':
-            settings.socketpath = optarg;
             break;
         case 'm':
             settings.maxbytes = ((size_t)atoi(optarg)) * 1024 * 1024;
@@ -4578,21 +4507,6 @@ int main (int argc, char **argv) {
             break;
         case 'v':
             settings.verbose++;
-            break;
-        case 'l':
-            if (settings.inter != NULL) {
-                size_t len = strlen(settings.inter) + strlen(optarg) + 2;
-                char *p = malloc(len);
-                if (p == NULL) {
-                    fprintf(stderr, "Failed to allocate memory\n");
-                    return 1;
-                }
-                snprintf(p, len, "%s,%s", settings.inter, optarg);
-                free(settings.inter);
-                settings.inter = p;
-            } else {
-                settings.inter= strdup(optarg);
-            }
             break;
         case 'd':
             do_daemonize = true;
@@ -4759,15 +4673,7 @@ int main (int argc, char **argv) {
         }
     }
 
-    /*
-     * Use one workerthread to serve each UDP port if the user specified
-     * multiple ports
-     */
-    if (settings.inter != NULL && strchr(settings.inter, ',')) {
-        settings.num_threads_per_udp = 1;
-    } else {
-        settings.num_threads_per_udp = settings.num_threads;
-    }
+    settings.num_threads_per_udp = settings.num_threads;
 
     if (settings.sasl) {
         if (!protocol_specified) {
@@ -4778,12 +4684,6 @@ int main (int argc, char **argv) {
                 exit(EX_USAGE);
             }
         }
-    }
-
-    if (tcp_specified && !udp_specified) {
-        settings.udpport = settings.port;
-    } else if (udp_specified && !tcp_specified) {
-        settings.port = settings.udpport;
     }
 
     if (maxcore != 0) {
@@ -4908,7 +4808,7 @@ int main (int argc, char **argv) {
     clock_handler(0, 0, 0);
 
     /* create the listening socket, bind it, and init */
-    if (settings.socketpath == NULL) {
+    if (1) {
         const char *portnumber_filename = getenv("MEMCACHED_PORT_FILENAME");
         char temp_portnumber_filename[PATH_MAX];
         FILE *portnumber_file = NULL;
@@ -4927,7 +4827,7 @@ int main (int argc, char **argv) {
 
         errno = 0;
         if (settings.port && server_sockets(settings.port, tcp_transport,
-                                           portnumber_file)) {
+					    portnumber_file)) {
             vperror("failed to listen on TCP port %d", settings.port);
             exit(EX_OSERR);
         }
@@ -4982,8 +4882,6 @@ int main (int argc, char **argv) {
     if (do_daemonize)
         remove_pidfile(pid_file);
     /* Clean up strdup() call for bind() address */
-    if (settings.inter)
-      free(settings.inter);
     if (l_socket)
       free(l_socket);
     if (u_socket)

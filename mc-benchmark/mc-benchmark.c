@@ -68,7 +68,6 @@ static struct config {
     int randomkeys_keyspacelen;
     aeEventLoop *el;
     char *hostip;
-    int hostport;
     int keepalive;
     long long start;
     long long totlatency;
@@ -317,7 +316,7 @@ static client createClient(void) {
     client c = zmalloc(sizeof(struct _client));
     char err[ANET_ERR_LEN];
 
-    c->fd = anetTcpNonBlockConnect(err,config.hostip,config.hostport);
+    c->fd = anetTcpNonBlockConnect(err,config.hostip);
     if (c->fd == NULL) {
         zfree(c);
         fprintf(stderr,"Connect: %s\n",err);
@@ -403,15 +402,7 @@ void parseOptions(int argc, char **argv) {
             config.keepalive = atoi(argv[i+1]);
             i++;
         } else if (!strcmp(argv[i],"-h") && !lastarg) {
-            char *ip = zmalloc(32);
-            if (anetResolve(NULL,argv[i+1],ip) == ANET_ERR) {
-                printf("Can't resolve %s\n", argv[i]);
-                exit(1);
-            }
-            config.hostip = ip;
-            i++;
-        } else if (!strcmp(argv[i],"-p") && !lastarg) {
-            config.hostport = atoi(argv[i+1]);
+	    config.hostip = argv[i+1];
             i++;
         } else if (!strcmp(argv[i],"-d") && !lastarg) {
             config.datasize = atoi(argv[i+1]);
@@ -493,8 +484,7 @@ int main(int argc, char **argv) {
     config.clients = listCreate();
     config.latency = zmalloc(sizeof(int)*(MAX_LATENCY+1));
 
-    config.hostip = "127.0.0.1";
-    config.hostport = 11211;
+    config.hostip = "localhost:11211";
 
     parseOptions(argc,argv);
 
