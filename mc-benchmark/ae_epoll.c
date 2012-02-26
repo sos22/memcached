@@ -58,6 +58,14 @@ static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int delmask) {
     }
 }
 
+static void aeApiFireEvent(aeEventLoop *eventLoop, int fd, int mask)
+{
+  assert(eventLoop->nr_fired < AE_SETSIZE);
+  eventLoop->fired[eventLoop->nr_fired].fd = fd;
+  eventLoop->fired[eventLoop->nr_fired].mask = mask;
+  eventLoop->nr_fired++;
+}
+
 static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     aeApiState *state = eventLoop->apidata;
     int retval, numevents = 0;
@@ -68,14 +76,13 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
         int j;
 
         numevents = retval;
+	assert(eventLoop->nr_fired + numevents <= AE_SETSIZE);
         for (j = 0; j < numevents; j++) {
             int mask = 0;
             struct epoll_event *e = state->events+j;
-
             if (e->events & EPOLLIN) mask |= AE_READABLE;
             if (e->events & EPOLLOUT) mask |= AE_WRITABLE;
-            eventLoop->fired[j].fd = e->data.fd;
-            eventLoop->fired[j].mask = mask;
+	    aeApiFireEvent(eventLoop, e->data.fd, mask);
         }
     }
     return numevents;

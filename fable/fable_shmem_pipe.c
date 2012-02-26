@@ -48,6 +48,8 @@ static unsigned ring_order = 9;
 #define DBG(x) do { x; } while (0)
 #endif
 
+#define DBGPRINT printf
+
 struct extent {
 	unsigned base;
 	unsigned size;
@@ -58,7 +60,7 @@ typedef struct {
 } simplex_id_t;
 
 #define SIMPLEX_SEND ((simplex_id_t){1})
-#define SIMPLEX_RECV ((simplex_id_t){2})
+#define SIMPLEX_RECV ((simplex_id_t){0})
 
 struct shmem_simplex {
 	int fd;
@@ -606,14 +608,22 @@ struct fable_handle *
 fable_accept_shmem_pipe(struct fable_handle *handle, int direction)
 {
   struct shmem_simplex *send, *recv;
+  struct fable_handle *res;
   struct shmem_handle *h = (struct shmem_handle *)handle;
   send = NULL;
   recv = NULL;
-  if (direction == FABLE_DIRECTION_DUPLEX || direction == FABLE_DIRECTION_RECEIVE)
+  DBGPRINT("Accept on %p\n", (void *)handle);
+  if (direction == FABLE_DIRECTION_DUPLEX || direction == FABLE_DIRECTION_RECEIVE) {
     recv = accept_simplex(h->listen_fd, SIMPLEX_RECV);
-  if (direction == FABLE_DIRECTION_DUPLEX || direction == FABLE_DIRECTION_SEND)
+    DBGPRINT("Receive fd %d on %p\n", recv->fd, (void *)recv);
+  }
+  if (direction == FABLE_DIRECTION_DUPLEX || direction == FABLE_DIRECTION_SEND) {
     send = accept_simplex(h->listen_fd, SIMPLEX_SEND);
-  return fable_handle_from_shmem_simplexes(send, recv);
+    DBGPRINT("Send fd %d\n", send->fd);
+  }
+  res = fable_handle_from_shmem_simplexes(send, recv);
+  DBGPRINT("accepted %p\n", (void *)res);
+  return res;
 }
 
 static struct shmem_simplex *
@@ -681,17 +691,21 @@ connect_simplex(const char *name, simplex_id_t simplex)
 struct fable_handle* fable_connect_shmem_pipe(const char* name, int direction)
 {
   struct shmem_simplex *send, *recv;
+  struct fable_handle *res;
   send = NULL;
   recv = NULL;
   if (direction == FABLE_DIRECTION_DUPLEX || direction == FABLE_DIRECTION_SEND)
     send = connect_simplex(name, SIMPLEX_SEND);
   if (direction == FABLE_DIRECTION_DUPLEX || direction == FABLE_DIRECTION_RECEIVE)
     recv = connect_simplex(name, SIMPLEX_RECV);
-  return fable_handle_from_shmem_simplexes(send, recv);
+  res = fable_handle_from_shmem_simplexes(send, recv);
+  DBGPRINT("connected %p\n", (void *)res);
+  return res;
 }
 
 struct fable_buf* fable_get_read_buf_shmem_pipe(struct fable_handle* handle, unsigned len)
 {
+  DBGPRINT("get read buf on %p\n", (void *)handle);
   struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
 
   while(sp->incoming_bytes_consumed - sp->incoming_bytes < sizeof(struct extent)) {
@@ -722,6 +736,7 @@ struct fable_buf* fable_get_read_buf_shmem_pipe(struct fable_handle* handle, uns
 }
 
 void fable_release_read_buf_shmem_pipe(struct fable_handle* handle, struct fable_buf* fbuf) {
+  DBGPRINT("release read buf on %p\n", (void *)handle);
 
   struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
   struct extent *inc = (struct extent*)(sp->incoming + sp->incoming_bytes_consumed);
@@ -807,6 +822,7 @@ static int wait_for_returned_buffers(struct shmem_simplex *sp)
 
 struct fable_buf* fable_get_write_buf_shmem_pipe(struct fable_handle* handle, unsigned len)
 {
+  DBGPRINT("get write buf on %p\n", (void *)handle);
   struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
   unsigned long offset;
   unsigned allocated_len = len;
@@ -831,6 +847,7 @@ struct fable_buf* fable_get_write_buf_shmem_pipe(struct fable_handle* handle, un
 
 int fable_release_write_buf_shmem_pipe(struct fable_handle* handle, struct fable_buf* fbuf)
 {
+  DBGPRINT("release write buf on %p\n", (void*)handle);
   struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
   struct extent ext;
 
@@ -1020,9 +1037,22 @@ void fable_abandon_write_buf_shmem_pipe(struct fable_handle *handle, struct fabl
   free(fbuf);
 }
 
+int fable_handle_is_readable_shmem_pipe(struct fable_handle *handle)
+{
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
+  return sp->incoming_bytes_consumed - sp->incoming_bytes >= sizeof(struct extent);
+}
+
+int fable_handle_is_writable_shmem_pipe(struct fable_handle *handle)
+{
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
+  return any_shared_space(sp);
+}
+
 static void libevent_recv_handler(int fd, short which, void *ctxt)
 {
   struct fable_event *evt = ctxt;
+  DBGPRINT("Receive event fired on %p\n", (void*)evt->handle);
   evt->handler(evt->handle, which, evt->ctxt);
 }
 
@@ -1030,6 +1060,7 @@ static void libevent_send_handler(int fd, short which, void *ctxt)
 {
   struct fable_event *evt = ctxt;
   struct shmem_simplex *sp = simplex_from_fable_handle(evt->handle, SIMPLEX_SEND);
+  DBGPRINT("Send event fired on %p\n", (void*)evt->handle);
   wait_for_returned_buffers(sp);
   if (any_shared_space(sp))
     evt->handler(evt->handle, EV_WRITE | (which & ~EV_READ), evt->ctxt);
@@ -1038,6 +1069,7 @@ static void libevent_send_handler(int fd, short which, void *ctxt)
 static void libevent_accept_handler(int fd, short which, void *ctxt)
 {
   struct fable_event *evt = ctxt;
+  DBGPRINT("Accept event fired on %p\n", (void *)evt->handle);
   evt->handler(evt->handle, which, evt->ctxt);
 }
 
@@ -1049,6 +1081,7 @@ void fable_add_event(struct fable_event *evt,
 				     short which, void *ctxt),
 		     void *ctxt)
 {
+  DBGPRINT("fable_add_event(%p, %x)\n", (void *)handle, event_flags);
   struct shmem_simplex *recv_sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
   struct shmem_simplex *send_sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
 
@@ -1069,7 +1102,7 @@ void fable_add_event(struct fable_event *evt,
   }
 
   if (recv_sp) {
-    assert(event_flags == (EV_PERSIST|EV_READ));
+    DBGPRINT("Have a receive SP %p, waiting for fd %d\n", (void *)recv_sp, recv_sp->fd);
     event_set(&evt->recv_event, recv_sp->fd,
 	      EV_PERSIST|EV_READ, libevent_recv_handler, evt);
     event_base_set(base, &evt->recv_event);
@@ -1085,16 +1118,21 @@ void fable_add_event(struct fable_event *evt,
   }
 
   if (event_flags & EV_READ) {
-    if (recv_sp->incoming_bytes_consumed - recv_sp->incoming_bytes >= sizeof(struct extent)) {
+    DBGPRINT("Want read events, have %d consumed of %d incoming\n",
+	     recv_sp->incoming_bytes_consumed, recv_sp->incoming_bytes);
+    if (fable_handle_is_readable(handle)) {
+      DBGPRINT("Request immediate event activation\n");
       event_active(&evt->recv_event, EV_READ, 1);
     } else {
+      DBGPRINT("Asking libevent to wake us up later.\n");
       if (event_add(&evt->recv_event, 0) == -1)
 	abort();
     }
   }
 
   if (event_flags & EV_WRITE) {
-    if (any_shared_space(send_sp)) {
+    DBGPRINT("Want write events, have space: %d\n", any_shared_space(send_sp));
+    if (fable_handle_is_writable(handle)) {
       event_active(&evt->send_event, EV_READ, 1);
     } else {
       if (event_add(&evt->send_event, 0) == -1)

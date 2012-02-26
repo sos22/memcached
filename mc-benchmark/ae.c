@@ -88,6 +88,9 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask
 	fe->clientData = clientData;
 	if (fd > eventLoop->maxfd)
 	    eventLoop->maxfd = fd;
+
+	if (fable_handle_is_readable(sfd))
+	    aeApiFireEvent(eventLoop, fd, r ? AE_READABLE : AE_WRITABLE);
     }
     if (mask & AE_WRITABLE) {
 	int r;
@@ -95,6 +98,8 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask
 	assert(fd < AE_SETSIZE);
 	aeFileEvent *fe = &eventLoop->events[fd];
 
+	printf("Listen on fd %d for read=%d for writing to handle %p\n",
+	       fd, r, (void *)sfd);
 	if (aeApiAddEvent(eventLoop, fd, r ? AE_READABLE : AE_WRITABLE) == -1)
 	    abort();
 	fe->handle = sfd;
@@ -103,6 +108,8 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask
 	fe->clientData = clientData;
 	if (fd > eventLoop->maxfd)
 	    eventLoop->maxfd = fd;
+	if (fable_handle_is_writable(sfd))
+	    aeApiFireEvent(eventLoop, fd, r ? AE_READABLE : AE_WRITABLE);
     }
     return AE_OK;
 }
@@ -133,6 +140,7 @@ void aeDeleteFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mas
 	int fd = fable_get_fd_write(sfd, &r);
 	aeFileEvent *fe = &eventLoop->events[fd];
 
+	printf("Delete write event on fd %d\n", fd);
 	if (fe->hl_mask & AE_WRITABLE) {
 	    fe->hl_mask = fe->hl_mask & ~AE_WRITABLE;
 	    if (fd == eventLoop->maxfd &&
@@ -352,7 +360,10 @@ static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         }
 
         numevents = aeApiPoll(eventLoop, tvp);
-        for (j = 0; j < numevents; j++) {
+        for (j = 0; j < eventLoop->nr_fired; j++) {
+	    printf("FD %d fired, mask %d\n",
+		   eventLoop->fired[j].fd,
+		   eventLoop->fired[j].mask);
             aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
 	    int ll_mask = fe->ll_mask;
 	    int hl_mask = fe->hl_mask;
@@ -374,6 +385,7 @@ static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 	    }
             processed++;
         }
+	eventLoop->nr_fired = 0;
     }
     /* Check time events */
     if (flags & AE_TIME_EVENTS)

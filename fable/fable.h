@@ -41,6 +41,8 @@ struct fable_buf {
 #define fable_handle_name CONC(fable_handle_name_, FABLE_TYPE)
 #define fable_get_fd_read CONC(fable_get_fd_read_, FABLE_TYPE)
 #define fable_get_fd_write CONC(fable_get_fd_write_, FABLE_TYPE)
+#define fable_handle_is_readable CONC(fable_handle_is_readable_, FABLE_TYPE)
+#define fable_handle_is_writable CONC(fable_handle_is_writable_, FABLE_TYPE)
 
 #endif
 
@@ -91,7 +93,9 @@ struct fable_handle;
   int fable_get_fd_read_ ## name(struct fable_handle *handle,		\
 				 int *read);				\
   int fable_get_fd_write_ ## name(struct fable_handle *handle,		\
-				  int *read)
+				  int *read);				\
+  int fable_handle_is_readable_ ## name(struct fable_handle *handle);	\
+  int fable_handle_is_writable_ ## name(struct fable_handle *handle)
 
 fable_mk_methods(unixdomain);
 fable_mk_methods(tcp);
