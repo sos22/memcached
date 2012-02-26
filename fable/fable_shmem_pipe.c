@@ -1035,6 +1035,12 @@ static void libevent_send_handler(int fd, short which, void *ctxt)
     evt->handler(evt->handle, EV_WRITE | (which & ~EV_READ), evt->ctxt);
 }
 
+static void libevent_accept_handler(int fd, short which, void *ctxt)
+{
+  struct fable_event *evt = ctxt;
+  evt->handler(evt->handle, which, evt->ctxt);
+}
+
 void fable_add_event(struct fable_event *evt,
 		     struct event_base *base,
 		     struct fable_handle *handle,
@@ -1051,7 +1057,19 @@ void fable_add_event(struct fable_event *evt,
   evt->ctxt = ctxt;
   evt->base = base;
 
+  if (!recv_sp && !send_sp) {
+    struct shmem_handle *sh = (struct shmem_handle *)handle;
+    assert(sh->listen_fd >= 0);
+    event_set(&evt->recv_event, sh->listen_fd, EV_PERSIST|EV_READ,
+	      libevent_accept_handler, evt);
+    event_base_set(base, &evt->recv_event);
+    if (event_add(&evt->recv_event, 0) == -1)
+      abort();
+    return;
+  }
+
   if (recv_sp) {
+    assert(event_flags == (EV_PERSIST|EV_READ));
     event_set(&evt->recv_event, recv_sp->fd,
 	      EV_PERSIST|EV_READ, libevent_recv_handler, evt);
     event_base_set(base, &evt->recv_event);

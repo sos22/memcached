@@ -93,7 +93,7 @@ typedef struct _client {
 } *client;
 
 /* Prototypes */
-static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask);
+static void writeHandler(aeEventLoop *el, struct fable_handle *fd, void *privdata, int mask);
 static void createMissingClients(client c);
 
 /* Implementation */
@@ -217,7 +217,7 @@ static int readLen(char *p, int *len) {
     return tail+2-p;
 }
 
-static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask)
+static void readHandler(aeEventLoop *el, struct fable_handle *fd, void *privdata, int mask)
 {
     char buf[1024*16], *p;
     int nread, pos=0, len=0;
@@ -282,7 +282,7 @@ done:
     return;
 }
 
-static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask)
+static void writeHandler(aeEventLoop *el, struct fable_handle *fd, void *privdata, int mask)
 {
     client c = privdata;
     MCB_NOTUSED(el);

@@ -24,11 +24,12 @@ static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
     struct epoll_event ee;
     /* If the fd was already monitored for some event, we need a MOD
      * operation. Otherwise we need an ADD operation. */
-    int op = eventLoop->events[fd].mask == AE_NONE ?
+    int op = eventLoop->events[fd].ll_mask == AE_NONE ?
             EPOLL_CTL_ADD : EPOLL_CTL_MOD;
 
     ee.events = 0;
-    mask |= eventLoop->events[fd].mask; /* Merge old events */
+    eventLoop->events[fd].ll_mask |= mask;
+    mask = eventLoop->events[fd].ll_mask; /* Merge old events */
     if (mask & AE_READABLE) ee.events |= EPOLLIN;
     if (mask & AE_WRITABLE) ee.events |= EPOLLOUT;
     ee.data.u64 = 0; /* avoid valgrind warning */
@@ -40,7 +41,8 @@ static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
 static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int delmask) {
     aeApiState *state = eventLoop->apidata;
     struct epoll_event ee;
-    int mask = eventLoop->events[fd].mask & (~delmask);
+    int mask = eventLoop->events[fd].ll_mask & (~delmask);
+    eventLoop->events[fd].ll_mask &= ~delmask;
 
     ee.events = 0;
     if (mask & AE_READABLE) ee.events |= EPOLLIN;

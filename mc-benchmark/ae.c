@@ -60,8 +60,10 @@ aeEventLoop *aeCreateEventLoop(void) {
     }
     /* Events with mask == AE_NONE are not set. So let's initialize the
      * vector with it. */
-    for (i = 0; i < AE_SETSIZE; i++)
-        eventLoop->events[i].mask = AE_NONE;
+    for (i = 0; i < AE_SETSIZE; i++) {
+        eventLoop->events[i].ll_mask = AE_NONE;
+        eventLoop->events[i].hl_mask = AE_NONE;
+    }
     return eventLoop;
 }
 
@@ -80,20 +82,23 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask
 
 	if (aeApiAddEvent(eventLoop, fd, r ? AE_READABLE : AE_WRITABLE) == -1)
 	    abort();
-	fe->mask |= AE_READABLE;
+	fe->handle = sfd;
+	fe->hl_mask |= AE_READABLE;
 	fe->rfileProc = proc;
 	fe->clientData = clientData;
 	if (fd > eventLoop->maxfd)
 	    eventLoop->maxfd = fd;
     }
     if (mask & AE_WRITABLE) {
-	int fd = fable_get_fd(sfd);
+	int r;
+	int fd = fable_get_fd_write(sfd, &r);
 	assert(fd < AE_SETSIZE);
 	aeFileEvent *fe = &eventLoop->events[fd];
 
-	if (aeApiAddEvent(eventLoop, fd, mask) == -1)
+	if (aeApiAddEvent(eventLoop, fd, r ? AE_READABLE : AE_WRITABLE) == -1)
 	    abort();
-	fe->mask |= AE_WRITABLE;
+	fe->handle = sfd;
+	fe->hl_mask |= AE_WRITABLE;
 	fe->wfileProc = proc;
 	fe->clientData = clientData;
 	if (fd > eventLoop->maxfd)
@@ -105,39 +110,41 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask
 void aeDeleteFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask)
 {
     if (mask & AE_READABLE) {
-	int fd = fable_get_fd(sfd);
+	int r;
+	int fd = fable_get_fd_read(sfd, &r);
 	aeFileEvent *fe = &eventLoop->events[fd];
 
-	if (fe->mask & AE_READABLE) {
-	    fe->mask = fe->mask & (~AE_READABLE);
+	if (fe->hl_mask & AE_READABLE) {
+	    fe->hl_mask = fe->hl_mask & ~AE_READABLE;
 	    if (fd == eventLoop->maxfd &&
-		fe->mask == AE_NONE) {
+		fe->hl_mask == AE_NONE) {
 		/* Update the max fd */
 		int j;
 
 		for (j = eventLoop->maxfd-1; j >= 0; j--)
-		    if (eventLoop->events[j].mask != AE_NONE) break;
+		    if (eventLoop->events[j].hl_mask != AE_NONE) break;
 		eventLoop->maxfd = j;
 	    }
-	    aeApiDelEvent(eventLoop, fd, AE_READABLE);
+	    aeApiDelEvent(eventLoop, fd, r ? AE_READABLE : AE_WRITABLE);
 	}
     }
     if (mask & AE_WRITABLE) {
-	int fd = fable_get_fd(sfd);
+	int r;
+	int fd = fable_get_fd_write(sfd, &r);
 	aeFileEvent *fe = &eventLoop->events[fd];
 
-	if (fe->mask & AE_WRITABLE) {
-	    fe->mask = fe->mask & (~AE_WRITABLE);
+	if (fe->hl_mask & AE_WRITABLE) {
+	    fe->hl_mask = fe->hl_mask & ~AE_WRITABLE;
 	    if (fd == eventLoop->maxfd &&
-		fe->mask == AE_NONE) {
+		fe->hl_mask == AE_NONE) {
 		/* Update the max fd */
 		int j;
 
 		for (j = eventLoop->maxfd-1; j >= 0; j--)
-		    if (eventLoop->events[j].mask != AE_NONE) break;
+		    if (eventLoop->events[j].hl_mask != AE_NONE) break;
 		eventLoop->maxfd = j;
 	    }
-	    aeApiDelEvent(eventLoop, fd, AE_WRITABLE);
+	    aeApiDelEvent(eventLoop, fd, r ? AE_READABLE : AE_WRITABLE);
 	}
     }
 }
@@ -347,21 +354,24 @@ static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         numevents = aeApiPoll(eventLoop, tvp);
         for (j = 0; j < numevents; j++) {
             aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
-            int mask = eventLoop->fired[j].mask;
+	    int ll_mask = fe->ll_mask;
+	    int hl_mask = fe->hl_mask;
+            int fired_mask = eventLoop->fired[j].mask;
             int fd = eventLoop->fired[j].fd;
-            int rfired = 0;
 
-	    /* note the fe->mask & mask & ... code: maybe an already processed
-             * event removed an element that fired and we still didn't
-             * processed, so we check if the event is still valid. */
-            if (fe->mask & mask & AE_READABLE) {
-                rfired = 1;
-                fe->rfileProc(eventLoop,fd,fe->clientData,mask);
-            }
-            if (fe->mask & mask & AE_WRITABLE) {
-                if (!rfired || fe->wfileProc != fe->rfileProc)
-                    fe->wfileProc(eventLoop,fd,fe->clientData,mask);
-            }
+	    ll_mask &= fired_mask;
+	    if (ll_mask == AE_READABLE) {
+		if (hl_mask == AE_READABLE) {
+		    fe->rfileProc(eventLoop,fe->handle,fe->clientData,AE_READABLE);
+		} else if (hl_mask == AE_WRITABLE) {
+		    fe->wfileProc(eventLoop,fe->handle,fe->clientData,AE_WRITABLE);
+		} else {
+		    abort();
+		}
+	    } else if (ll_mask == 0) {
+	    } else {
+		abort();
+	    }
             processed++;
         }
     }

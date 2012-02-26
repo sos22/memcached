@@ -3,7 +3,7 @@
 # This file is released under the BSD license, see the COPYING file
 
 uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
-OPTIMIZATION?=-O2
+OPTIMIZATION?=
 ifeq ($(uname_S),SunOS)
   CFLAGS?= -std=c99 -pedantic $(OPTIMIZATION) -Wall -W -D__EXTENSIONS__ -D_XPG6
   CCLINK?= -ldl -lnsl -lsocket -lm
@@ -18,7 +18,7 @@ PREFIX= /usr/local
 INSTALL_BIN= $(PREFIX)/bin
 INSTALL= cp -p
 
-BENCHOBJ = ae.o anet.o mc-benchmark.o sds.o adlist.o zmalloc.o fable_tcp.o
+BENCHOBJ = ae.o anet.o mc-benchmark.o sds.o adlist.o zmalloc.o
 BENCHOBJ += ../libevent/event.o ../libevent/log.o ../libevent/signal.o ../libevent/evutil.o ../libevent/epoll.o
 BENCHOBJ += ../fable/fable_shmem_pipe.o ../fable/fable_unixdomain.o ../fable/io_helpers.o
 

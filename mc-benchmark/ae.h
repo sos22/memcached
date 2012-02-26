@@ -58,14 +58,16 @@
 struct aeEventLoop;
 
 /* Types and data structures */
-typedef void aeFileProc(struct aeEventLoop *eventLoop, int fd, void *clientData, int mask);
+typedef void aeFileProc(struct aeEventLoop *eventLoop, struct fable_handle *fd, void *clientData, int mask);
 typedef int aeTimeProc(struct aeEventLoop *eventLoop, long long id, void *clientData);
 typedef void aeEventFinalizerProc(struct aeEventLoop *eventLoop, void *clientData);
 typedef void aeBeforeSleepProc(struct aeEventLoop *eventLoop);
 
 /* File event structure */
 typedef struct aeFileEvent {
-    int mask; /* one of AE_(READABLE|WRITABLE) */
+    struct fable_handle *handle;
+    int ll_mask; /* one of AE_(READABLE|WRITABLE) */
+    int hl_mask; /* one of AE_(READABLE|WRITABLE) */
     aeFileProc *rfileProc;
     aeFileProc *wfileProc;
     void *clientData;
