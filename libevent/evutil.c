@@ -36,15 +36,11 @@
 #endif
 
 #include <sys/types.h>
-#ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
-#endif
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
-#ifdef HAVE_FCNTL_H
 #include <fcntl.h>
-#endif
 #ifdef HAVE_STDLIB_H
 #include <stdlib.h>
 #endif
@@ -186,6 +182,7 @@ evutil_make_socket_nonblocking(int fd)
 ev_int64_t
 evutil_strtoll(const char *s, char **endptr, int base)
 {
+#define HAVE_STRTOLL
 #ifdef HAVE_STRTOLL
 	return (ev_int64_t)strtoll(s, endptr, base);
 #elif SIZEOF_LONG == 8

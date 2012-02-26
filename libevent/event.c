@@ -34,11 +34,7 @@
 #undef WIN32_LEAN_AND_MEAN
 #endif
 #include <sys/types.h>
-#ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
-#else 
-#include <sys/_libevent_time.h>
-#endif
 #include <sys/queue.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,51 +52,15 @@
 #include "evutil.h"
 #include "log.h"
 
-#ifdef HAVE_EVENT_PORTS
-extern const struct eventop evportops;
-#endif
-#ifdef HAVE_SELECT
 extern const struct eventop selectops;
-#endif
-#ifdef HAVE_POLL
 extern const struct eventop pollops;
-#endif
-#ifdef HAVE_EPOLL
 extern const struct eventop epollops;
-#endif
-#ifdef HAVE_WORKING_KQUEUE
-extern const struct eventop kqops;
-#endif
-#ifdef HAVE_DEVPOLL
-extern const struct eventop devpollops;
-#endif
-#ifdef WIN32
-extern const struct eventop win32ops;
-#endif
 
 /* In order of preference */
 static const struct eventop *eventops[] = {
-#ifdef HAVE_EVENT_PORTS
-	&evportops,
-#endif
-#ifdef HAVE_WORKING_KQUEUE
-	&kqops,
-#endif
-#ifdef HAVE_EPOLL
 	&epollops,
-#endif
-#ifdef HAVE_DEVPOLL
-	&devpollops,
-#endif
-#ifdef HAVE_POLL
 	&pollops,
-#endif
-#ifdef HAVE_SELECT
 	&selectops,
-#endif
-#ifdef WIN32
-	&win32ops,
-#endif
 	NULL
 };
 

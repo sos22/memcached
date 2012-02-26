@@ -71,6 +71,7 @@ struct event_base {
 };
 
 /* Internal use only: Functions that might be missing from <sys/queue.h> */
+#define HAVE_TAILQFOREACH
 #ifndef HAVE_TAILQFOREACH
 #define	TAILQ_FIRST(head)		((head)->tqh_first)
 #define	TAILQ_END(head)			NULL

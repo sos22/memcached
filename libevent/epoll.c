@@ -31,11 +31,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/resource.h>
-#ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
-#else
-#include <sys/_libevent_time.h>
-#endif
 #include <sys/queue.h>
 #include <sys/epoll.h>
 #include <signal.h>
