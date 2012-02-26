@@ -951,7 +951,7 @@ event_queue_remove(struct event_base *base, struct event *ev, int queue)
 {
 	if (!(ev->ev_flags & queue))
 		event_errx(1, "%s: %p(fd %d) not on queue %x", __func__,
-			   ev, ev->ev_fd, queue);
+			   (void *)ev, ev->ev_fd, queue);
 
 	if (~ev->ev_flags & EVLIST_INTERNAL)
 		base->event_count--;
@@ -983,7 +983,7 @@ event_queue_insert(struct event_base *base, struct event *ev, int queue)
 			return;
 
 		event_errx(1, "%s: %p(fd %d) already on queue %x", __func__,
-			   ev, ev->ev_fd, queue);
+			   (void *)ev, ev->ev_fd, queue);
 	}
 
 	if (~ev->ev_flags & EVLIST_INTERNAL)

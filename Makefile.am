@@ -16,7 +16,15 @@ memcached_SOURCES = memcached.c memcached.h \
                     thread.c daemon.c \
                     stats.c stats.h \
                     util.c util.h \
-                    trace.h cache.h sasl_defs.h fable/fable_tcp.c
+                    trace.h cache.h sasl_defs.h \
+		    libevent/event.c \
+		    libevent/log.c \
+		    libevent/signal.c \
+		    libevent/evutil.c \
+		    libevent/epoll.c \
+		    libevent/poll.c \
+		    libevent/select.c \
+		    fable/fable_tcp.c
 
 if BUILD_CACHE
 memcached_SOURCES += cache.c

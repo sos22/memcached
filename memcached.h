@@ -13,13 +13,13 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <netinet/in.h>
-#include <event.h>
 #include <netdb.h>
 #include <pthread.h>
 #include <unistd.h>
 
 #include "protocol_binary.h"
 #include "cache.h"
+#include "libevent/event.h"
 
 struct fable_handle;
 
