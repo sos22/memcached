@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
@@ -25,6 +26,9 @@
 
 #include "fable.h"
 #include "io_helpers.h"
+
+#define container_of(ptr, type, field)				\
+  ((type *)((unsigned long)(ptr) - offsetof(type, field)))
 
 #define PAGE_ORDER 12
 #define CACHE_LINE_SIZE 64
@@ -51,17 +55,14 @@ struct extent {
 #define SHMEMPIPE_HANDLE_LISTEN 1
 #define SHMEMPIPE_HANDLE_CONN 2
 
-struct shmem_pipe_handle {
-
+struct shmem_simplex {
   int type;
   int fd;
   char *name;
-
 };
 
-struct shmem_pipe_handle_conn {
-
-        struct shmem_pipe_handle base;
+struct shmem_simplex_conn {
+        struct shmem_simplex base;
 
         int direction;
 	void *ring;
@@ -108,7 +109,7 @@ struct alloc_node {
 
 #ifndef NDEBUG
 static void
-sanity_check(const struct shmem_pipe_handle_conn *sp)
+sanity_check(const struct shmem_simplex_conn *sp)
 {
 	const struct alloc_node *cursor;
 	int found_nf = 0, found_lf = 0;
@@ -153,12 +154,12 @@ sanity_check(const struct shmem_pipe_handle_conn *sp)
 }
 #else
 static void
-sanity_check(const struct shmem_pipe_handle_conn *sp)
+sanity_check(const struct shmem_simplex_conn *sp)
 {
 }
 #endif
 
-static unsigned any_shared_space(struct shmem_pipe_handle_conn *sp)
+static unsigned any_shared_space(struct shmem_simplex_conn *sp)
 {
 
   /* As its name suggests, if next_free_alloc is set, then it points to a free area. We can write at least 1 byte, so we're writable. */
@@ -174,7 +175,7 @@ static unsigned any_shared_space(struct shmem_pipe_handle_conn *sp)
 }
 
 static unsigned
-alloc_shared_space(struct shmem_pipe_handle_conn *sp, unsigned* size_out)
+alloc_shared_space(struct shmem_simplex_conn *sp, unsigned* size_out)
 {
         unsigned size = *size_out;
 	unsigned res;
@@ -279,7 +280,7 @@ alloc_shared_space(struct shmem_pipe_handle_conn *sp, unsigned* size_out)
 			}
 			f->is_free = 0;
 		} else {
-		        f = (struct alloc_node*)calloc(sizeof(struct alloc_node), 1);
+		        f = calloc(sizeof(struct alloc_node), 1);
 			DBG(sp->nr_alloc_nodes++);
 			f->next = sp->first_alloc;
 			f->start = 0;
@@ -301,7 +302,7 @@ alloc_shared_space(struct shmem_pipe_handle_conn *sp, unsigned* size_out)
 }
 
 static void
-release_shared_space(struct shmem_pipe_handle_conn *sp, unsigned start, unsigned size)
+release_shared_space(struct shmem_simplex_conn *sp, unsigned start, unsigned size)
 {
 	struct alloc_node *lan = sp->last_freed_node;
 	assert(start <= ring_size);
@@ -406,7 +407,7 @@ release_shared_space(struct shmem_pipe_handle_conn *sp, unsigned start, unsigned
 			sanity_check(sp);
 		} else {
 			/* Need a new node in the list */
-      		        lan = (struct alloc_node*)calloc(sizeof(*lan), 1);
+      		        lan = calloc(sizeof(*lan), 1);
 			lan->is_free = 1;
 			lan->end = size;
 			sp->first_alloc->start = lan->end;
@@ -429,7 +430,7 @@ release_shared_space(struct shmem_pipe_handle_conn *sp, unsigned start, unsigned
 			lan->end -= size;
 			assert(lan->end != lan->start);
 		} else {
-			struct alloc_node *t = (struct alloc_node*)calloc(sizeof(*lan), 1);
+			struct alloc_node *t = calloc(sizeof(*lan), 1);
 			t->prev = lan;
 			t->is_free = 1;
 			t->start = start;
@@ -449,8 +450,8 @@ release_shared_space(struct shmem_pipe_handle_conn *sp, unsigned start, unsigned
 	   node, and we need to convert it into three: an allocated
 	   node, a free node, and then another allocated node.  How
 	   tedious. */
-	struct alloc_node *a = (struct alloc_node*)calloc(sizeof(*a), 1);
-	struct alloc_node *b = (struct alloc_node*)calloc(sizeof(*b), 1);
+	struct alloc_node *a = calloc(sizeof(*a), 1);
+	struct alloc_node *b = calloc(sizeof(*b), 1);
 
 	a->next = b;
 	a->prev = lan;
@@ -497,27 +498,51 @@ fable_init_shmem_pipe()
 	fable_init_unixdomain();
 }
 
+static struct shmem_simplex *
+shmem_listener(int fd)
+{
+  struct shmem_simplex *ss = calloc(sizeof(*ss), 1);
+  if (!ss)
+    return NULL;
+  ss->type = SHMEMPIPE_HANDLE_LISTEN;
+  ss->fd = fd;
+  return ss;
+}
+
+static struct shmem_simplex *
+simplex_from_fable_handle(struct fable_handle *fh)
+{
+  return (struct shmem_simplex *)fh;
+}
+
+static struct shmem_simplex_conn *
+simplex_conn_from_fable_handle(struct fable_handle *fh)
+{
+  return container_of(simplex_from_fable_handle(fh),
+		      struct shmem_simplex_conn,
+		      base);
+}
+
+static struct fable_handle *
+fable_handle_from_shmem_simplex(struct shmem_simplex *fh)
+{
+  return (struct fable_handle *)fh;
+}
+
 struct fable_handle *
 fable_listen_shmem_pipe(const char* name)
 {
   void* unix_handle = fable_listen_unixdomain(name);
   if(!unix_handle)
     return 0;
-  struct shmem_pipe_handle* new_handle = (struct shmem_pipe_handle*)malloc(sizeof(struct shmem_pipe_handle));
-  if(!new_handle) {
-    errno = ENOMEM;
-    return 0;
-  }
-
-  new_handle->type = SHMEMPIPE_HANDLE_LISTEN;
-  new_handle->fd = *((int*)unix_handle);
-  new_handle->name = NULL;
+  struct shmem_simplex* new_handle = shmem_listener(*(int *)unix_handle);
+  if(!new_handle)
+    return NULL;
   free(unix_handle);
-  printf("Listening on %s\n", name);
-  return (struct fable_handle *)new_handle;
+  return fable_handle_from_shmem_simplex(new_handle);
 }
 
-static void shmem_pipe_init_send(struct shmem_pipe_handle_conn* new_handle) {
+static void shmem_pipe_init_send(struct shmem_simplex_conn* new_handle) {
 
   new_handle->first_alloc = (struct alloc_node*)calloc(sizeof(*new_handle->first_alloc), 1);
   new_handle->first_alloc->is_free = 1;
@@ -534,7 +559,7 @@ fable_accept_shmem_pipe(struct fable_handle *handle, int direction) {
     return 0;
   }
 
-  struct shmem_pipe_handle* listen_handle = (struct shmem_pipe_handle*)handle;
+  struct shmem_simplex* listen_handle = simplex_from_fable_handle(handle);
 
   void* new_unix_handle = fable_accept_unixdomain((struct fable_handle *)&listen_handle->fd, FABLE_DIRECTION_DUPLEX);
   if(!new_unix_handle)
@@ -564,7 +589,7 @@ fable_accept_shmem_pipe(struct fable_handle *handle, int direction) {
     return 0;
   }
 
-  struct shmem_pipe_handle_conn* new_handle = (struct shmem_pipe_handle_conn*)malloc(sizeof(struct shmem_pipe_handle_conn));
+  struct shmem_simplex_conn* new_handle = calloc(sizeof(struct shmem_simplex_conn), 1);
   if(!new_handle) {
     close(shmem_fd);
     close(conn_fd);
@@ -572,7 +597,6 @@ fable_accept_shmem_pipe(struct fable_handle *handle, int direction) {
     return 0;
   }
 
-  memset(new_handle, 0, sizeof(struct shmem_pipe_handle_conn));
   new_handle->base.fd = conn_fd;
   new_handle->base.type = SHMEMPIPE_HANDLE_CONN;
   new_handle->ring = ring_addr;
@@ -583,8 +607,7 @@ fable_accept_shmem_pipe(struct fable_handle *handle, int direction) {
     shmem_pipe_init_send(new_handle);
   // Otherwise memset-0 is enough
 
-  return (struct fable_handle *)new_handle;
-  
+  return fable_handle_from_shmem_simplex(&new_handle->base);
 }
 
 struct fable_handle* fable_connect_shmem_pipe(const char* name, int direction) {
@@ -614,7 +637,7 @@ struct fable_handle* fable_connect_shmem_pipe(const char* name, int direction) {
   }
 
   void* ring_addr = mmap(NULL, PAGE_SIZE * ring_pages, PROT_READ|PROT_WRITE, MAP_SHARED, shm_fd, 0);
- 
+
   void* unix_handle = fable_connect_unixdomain(name, FABLE_DIRECTION_DUPLEX);
   if(!unix_handle)
     return 0;
@@ -625,7 +648,7 @@ struct fable_handle* fable_connect_shmem_pipe(const char* name, int direction) {
   // OK, send our partner the FD and the appropriate size to mmap.
   int send_ret = unix_send_fd(unix_fd, shm_fd);
   close(shm_fd);
-  
+
   if(send_ret <= 0) {
     munmap(ring_addr, PAGE_SIZE * ring_pages);
     close(unix_fd);
@@ -634,8 +657,7 @@ struct fable_handle* fable_connect_shmem_pipe(const char* name, int direction) {
 
   write_all_fd(unix_fd, (const char*)&ring_pages, sizeof(int), 0);
 
-  struct shmem_pipe_handle_conn* conn_handle = (struct shmem_pipe_handle_conn*)malloc(sizeof(struct shmem_pipe_handle_conn));
-  memset(conn_handle, 0, sizeof(struct shmem_pipe_handle_conn));
+  struct shmem_simplex_conn* conn_handle = calloc(sizeof(struct shmem_simplex_conn), 1);
 
   conn_handle->base.fd = unix_fd;
   conn_handle->base.type = SHMEMPIPE_HANDLE_CONN;
@@ -647,13 +669,13 @@ struct fable_handle* fable_connect_shmem_pipe(const char* name, int direction) {
     shmem_pipe_init_send(conn_handle);
   // Otherwise memset-0 is enough
 
-  return (struct fable_handle *)conn_handle;
+  return fable_handle_from_shmem_simplex(&conn_handle->base);
 
 }
 
-struct fable_buf* fable_get_read_buf_shmem_pipe(struct fable_handle* handle, unsigned len) {
-
-  struct shmem_pipe_handle_conn *sp = (struct shmem_pipe_handle_conn*)handle;
+struct fable_buf* fable_get_read_buf_shmem_pipe(struct fable_handle* handle, unsigned len)
+{
+  struct shmem_simplex_conn *sp = simplex_conn_from_fable_handle(handle);
 
   while(sp->incoming_bytes_consumed - sp->incoming_bytes < sizeof(struct extent)) {
 
@@ -670,10 +692,10 @@ struct fable_buf* fable_get_read_buf_shmem_pipe(struct fable_handle* handle, uns
     sp->incoming_bytes += k;
 
   }
-  
+
   struct extent *inc = (struct extent*)(sp->incoming + sp->incoming_bytes_consumed);
 
-  struct shmem_pipe_buf* buf = (struct shmem_pipe_buf*)malloc(sizeof(struct shmem_pipe_buf));
+  struct shmem_pipe_buf* buf = malloc(sizeof(struct shmem_pipe_buf));
   buf->iov.iov_base = ((char*)sp->ring) + inc->base;
   buf->iov.iov_len = (inc->size < len ? inc->size : len);
   buf->base.bufs = &buf->iov;
@@ -684,16 +706,10 @@ struct fable_buf* fable_get_read_buf_shmem_pipe(struct fable_handle* handle, uns
 
 void fable_release_read_buf_shmem_pipe(struct fable_handle* handle, struct fable_buf* fbuf) {
 
-  struct shmem_pipe_handle_conn *sp = (struct shmem_pipe_handle_conn*)handle;
-#ifndef NDEBUG
-  struct shmem_pipe_buf* buf = (struct shmem_pipe_buf*)fbuf;
-#endif
-
-  assert(buf->base.nbufs == 1 && buf->base.bufs == &buf->iov);
-
+  struct shmem_simplex_conn *sp = simplex_conn_from_fable_handle(handle);
   struct extent *inc = (struct extent*)(sp->incoming + sp->incoming_bytes_consumed);
   assert(((char*)sp->ring) + inc->base == fbuf->bufs[0].iov_base);
-  
+
   struct extent tosend;
   // Was the extent fully consumed by this read?
   if(fbuf->bufs[0].iov_len == inc->size) {
@@ -746,7 +762,7 @@ void fable_release_read_buf_shmem_pipe(struct fable_handle* handle, struct fable
 }
 
 // Return 1 for success, 0 for remote closed, -1 for error including EAGAIN
-static int wait_for_returned_buffers(struct shmem_pipe_handle_conn *sp)
+static int wait_for_returned_buffers(struct shmem_simplex_conn *sp)
 {
 	int r;
 	int s;
@@ -774,7 +790,7 @@ static int wait_for_returned_buffers(struct shmem_pipe_handle_conn *sp)
 
 struct fable_buf* fable_get_write_buf_shmem_pipe(struct fable_handle* handle, unsigned len)
 {
-  struct shmem_pipe_handle_conn *sp = (struct shmem_pipe_handle_conn*)handle;
+  struct shmem_simplex_conn *sp = simplex_conn_from_fable_handle(handle);
   unsigned long offset;
   unsigned allocated_len = len;
 
@@ -786,7 +802,7 @@ struct fable_buf* fable_get_write_buf_shmem_pipe(struct fable_handle* handle, un
       return 0;
   }
 
-  struct shmem_pipe_buf* buf = (struct shmem_pipe_buf*)malloc(sizeof(struct shmem_pipe_buf));
+  struct shmem_pipe_buf* buf = malloc(sizeof(struct shmem_pipe_buf));
 
   buf->iov.iov_base = ((char*)sp->ring) + offset;
   buf->iov.iov_len = allocated_len;
@@ -798,13 +814,8 @@ struct fable_buf* fable_get_write_buf_shmem_pipe(struct fable_handle* handle, un
 
 int fable_release_write_buf_shmem_pipe(struct fable_handle* handle, struct fable_buf* fbuf)
 {
-  struct shmem_pipe_handle_conn *sp = (struct shmem_pipe_handle_conn*)handle;
-#ifndef NDEBUG
-  struct shmem_pipe_buf *buf = (struct shmem_pipe_buf*)fbuf;
-#endif
+  struct shmem_simplex_conn *sp = simplex_conn_from_fable_handle(handle);
   struct extent ext;
-
-  assert(fbuf->nbufs == 1 && fbuf->bufs == &buf->iov);
 
   unsigned long offset = ((char*)fbuf->bufs[0].iov_base) - ((char*)sp->ring);
   ext.base = offset;
@@ -820,16 +831,15 @@ int fable_release_write_buf_shmem_pipe(struct fable_handle* handle, struct fable
 
 // Warning: this is a little broken, as there are places where we do blocking reads or writes against the extent socket.
 // The hope is this won't make much difference because the extents are unlikely to fill enough space to ever actually block.
-void fable_set_nonblocking_shmem_pipe(struct fable_handle* handle) {
-
-  struct shmem_pipe_handle *sp = (struct shmem_pipe_handle*)handle;
+void fable_set_nonblocking_shmem_pipe(struct fable_handle* handle)
+{
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle);
   setnb_fd(sp->fd);
-  
 }
 
-static int action_needs_fd(struct shmem_pipe_handle* sp, int type) {
-
-  struct shmem_pipe_handle_conn* conn_handle = (struct shmem_pipe_handle_conn*)sp;
+static int action_needs_fd(struct shmem_simplex* sp, int type)
+{
+  struct shmem_simplex_conn* conn_handle = container_of(sp, struct shmem_simplex_conn, base);
 
   if(type == FABLE_SELECT_ACCEPT) {
     return 1;
@@ -849,7 +859,7 @@ static int action_needs_fd(struct shmem_pipe_handle* sp, int type) {
 
 void fable_get_select_fds_shmem_pipe(struct fable_handle* handle, int type, int* maxfd, fd_set* rfds, fd_set* wfds, fd_set* efds, struct timeval* timeout) {
 
-  struct shmem_pipe_handle *sp = (struct shmem_pipe_handle*)handle;
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle);
    
   if(action_needs_fd(sp, type)) {
     FD_SET(sp->fd, rfds);
@@ -865,7 +875,7 @@ void fable_get_select_fds_shmem_pipe(struct fable_handle* handle, int type, int*
 
 int fable_ready_shmem_pipe(struct fable_handle* handle, int type, fd_set* rfds, fd_set* wfds, fd_set* efds) {
   
-  struct shmem_pipe_handle *sp = (struct shmem_pipe_handle*)handle;
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle);
   
   if(action_needs_fd(sp, type))
     return FD_ISSET(sp->fd, rfds);
@@ -876,14 +886,14 @@ int fable_ready_shmem_pipe(struct fable_handle* handle, int type, fd_set* rfds, 
 
 void fable_close_shmem_pipe(struct fable_handle* handle) {
 
-  struct shmem_pipe_handle *sp = (struct shmem_pipe_handle*)handle;
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle);
 
   free(sp->name);
   close(sp->fd);
 
   if(sp->type == SHMEMPIPE_HANDLE_CONN) {
 
-    struct shmem_pipe_handle_conn* conn_handle = (struct shmem_pipe_handle_conn*)sp;
+    struct shmem_simplex_conn* conn_handle = container_of(sp, struct shmem_simplex_conn, base);
     munmap(conn_handle->ring, conn_handle->ring_pages * 4096);
 
     if(conn_handle->direction == FABLE_DIRECTION_SEND) {
@@ -938,7 +948,7 @@ struct fable_buf* fable_lend_write_buf_shmem_pipe(struct fable_handle* handle, c
 
 const char *fable_handle_name_shmem_pipe(struct fable_handle* handle)
 {
-  struct shmem_pipe_handle *c = (struct shmem_pipe_handle *)handle;
+  struct shmem_simplex *c = simplex_from_fable_handle(handle);
   if (!c->name) {
     int r = asprintf(&c->name, "FABLE:SHMEM_PIPE:%s,%d",
 		     c->type == SHMEMPIPE_HANDLE_CONN ? "conn" : "listen",
@@ -950,13 +960,13 @@ const char *fable_handle_name_shmem_pipe(struct fable_handle* handle)
 
 int fable_get_fd_shmem_pipe(struct fable_handle *handle)
 {
-  struct shmem_pipe_handle *c = (struct shmem_pipe_handle *)handle;
+  struct shmem_simplex *c = simplex_from_fable_handle(handle);
   return c->fd;
 }
 
 void fable_abandon_write_buf_shmem_pipe(struct fable_handle *handle, struct fable_buf *fbuf)
 {
-  struct shmem_pipe_handle_conn *sp = (struct shmem_pipe_handle_conn*)handle;
+  struct shmem_simplex_conn *sp = simplex_conn_from_fable_handle(handle);
   unsigned long offset = ((char*)fbuf->bufs[0].iov_base) - ((char*)sp->ring);
   release_shared_space(sp, offset, fbuf->bufs[0].iov_len);
   free(fbuf);
