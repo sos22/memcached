@@ -9,7 +9,7 @@ ifeq ($(uname_S),SunOS)
   CCLINK?= -ldl -lnsl -lsocket -lm
 else
   CFLAGS?= -std=c99 -pedantic $(OPTIMIZATION) -Wall -W $(ARCH) $(PROF)
-  CCLINK?= -lm
+  CCLINK?= -lm -lrt
 endif
 CCOPT= $(CFLAGS) $(CCLINK) $(ARCH) $(PROF)
 DEBUG?= -g -rdynamic -ggdb 
@@ -18,7 +18,7 @@ PREFIX= /usr/local
 INSTALL_BIN= $(PREFIX)/bin
 INSTALL= cp -p
 
-BENCHOBJ = ae.o anet.o mc-benchmark.o sds.o adlist.o zmalloc.o fable_tcp.o
+BENCHOBJ = ae.o anet.o mc-benchmark.o sds.o adlist.o zmalloc.o fable_shmem_pipe.o fable_unixdomain.o io_helpers.o
 
 BENCHPRGNAME = mc-benchmark
 
@@ -39,5 +39,9 @@ dep:
 bench:
 	./mc-benchmark
 
-fable_tcp.o: ../fable/fable_tcp.c
+fable_shmem_pipe.o: ../fable/fable_shmem_pipe.c
+	$(CC) -c $(CFLAGS) $(DEBUG) $(COMPILE_TIME) $<
+fable_unixdomain.o: ../fable/fable_unixdomain.c
+	$(CC) -c $(CFLAGS) $(DEBUG) $(COMPILE_TIME) $<
+io_helpers.o: ../fable/io_helpers.c
 	$(CC) -c $(CFLAGS) $(DEBUG) $(COMPILE_TIME) $<

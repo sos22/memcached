@@ -1,5 +1,4 @@
 
-#include "stddefines.h"
 #include "io_helpers.h"
 #include "fable.h"
 
@@ -7,11 +6,13 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdio.h>
 
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <linux/un.h> // For UNIX_PATH_MAX
 
-char coord_dir[] = "/tmp/phoenix_coord_XXXXXX";
+char coord_dir[] = "/tmp/phoenix_coord_ABCDEF";
 char fable_unix_buf[4096];
 
 #define MAX_UNIX_BUF (4096 - (sizeof(struct fable_buf) + sizeof(struct iovec)))
@@ -24,16 +25,17 @@ struct fable_buf_unix {
 } __attribute__((packed));
 
 void fable_init_unixdomain() {
-
+#if 0
   if(!mkdtemp(coord_dir)) {
     fprintf(stderr, "Couldn't create a coordination directory: %s\n", strerror(errno));
     exit(1);
   }
-
+#endif
+  mkdir(coord_dir, 0700);
 }
 
 // Ignore direction, all Unix sockets are duplex
-void* fable_connect_unixdomain(const char* name, int direction) {
+struct fable_handle *fable_connect_unixdomain(const char* name, int direction) {
 
   struct sockaddr_un addr;
   addr.sun_family = AF_UNIX;
@@ -54,11 +56,11 @@ void* fable_connect_unixdomain(const char* name, int direction) {
 
   int* handle = (int*)malloc(sizeof(int));
   *handle = fd;
-  return handle;
+  return (struct fable_handle *)handle;
 
 }
 
-void* fable_listen_unixdomain(const char* name) {
+struct fable_handle* fable_listen_unixdomain(const char* name) {
 
   int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if(listen_fd == -1)
@@ -82,33 +84,33 @@ void* fable_listen_unixdomain(const char* name) {
 
   int* handle = (int*)malloc(sizeof(int));
   *handle = listen_fd;
-  return handle;
+  return (struct fable_handle *)handle;
 
 }
 
 // Ignore direction, all Unix sockets are duplex
-void* fable_accept_unixdomain(void* listen_handle, int direction) {
+struct fable_handle* fable_accept_unixdomain(struct fable_handle* listen_handle, int direction) {
 
   struct sockaddr_un otherend;
   socklen_t otherend_len = sizeof(otherend);
-  int newfd = accept(*((int*)listen_handle), (sockaddr*)&otherend, &otherend_len);
+  int newfd = accept(*((int*)listen_handle), (struct sockaddr*)&otherend, &otherend_len);
   if(newfd != -1) {
     int* handle = (int*)malloc(sizeof(int));
     *handle = newfd;
-    return handle;
+    return (struct fable_handle *)handle;
   }
   else
     return 0;
 
 }
 
-void fable_set_nonblocking_unixdomain(void* handle) {
+void fable_set_nonblocking_unixdomain(struct fable_handle* handle) {
 
   setnb_fd(*((int*)handle));
 
 }
 
-void fable_get_select_fds_unixdomain(void* handle, int type, int* maxfd, fd_set* rfds, fd_set* wfds, fd_set* efds, struct timeval* timeout) {
+void fable_get_select_fds_unixdomain(struct fable_handle* handle, int type, int* maxfd, fd_set* rfds, fd_set* wfds, fd_set* efds, struct timeval* timeout) {
 
   int fd = *((int*)handle);
   if(type == FABLE_SELECT_ACCEPT || type == FABLE_SELECT_READ)
@@ -120,7 +122,7 @@ void fable_get_select_fds_unixdomain(void* handle, int type, int* maxfd, fd_set*
 
 }
 
-int fable_ready_unixdomain(void* handle, int type, fd_set* rfds, fd_set* wfds, fd_set* efds) {
+int fable_ready_unixdomain(struct fable_handle* handle, int type, fd_set* rfds, fd_set* wfds, fd_set* efds) {
 
   int fd = *((int*)handle);
   if(type == FABLE_SELECT_ACCEPT || type == FABLE_SELECT_READ)
@@ -130,7 +132,7 @@ int fable_ready_unixdomain(void* handle, int type, fd_set* rfds, fd_set* wfds, f
 
 }
 
-struct fable_buf* fable_get_write_buf_unixdomain(void* handle, unsigned len) {
+struct fable_buf* fable_get_write_buf_unixdomain(struct fable_handle* handle, unsigned len) {
 
   int malloc_sz = sizeof(struct fable_buf_unix) + len;
   if(malloc_sz > 4096) {
@@ -149,7 +151,7 @@ struct fable_buf* fable_get_write_buf_unixdomain(void* handle, unsigned len) {
 
 }
 
-struct fable_buf* fable_lend_write_buf_unixdomain(void* handle, const char* buf, unsigned len) {
+struct fable_buf* fable_lend_write_buf_unixdomain(struct fable_handle* handle, const char* buf, unsigned len) {
 
   struct fable_buf_unix* new_buf = (struct fable_buf_unix*)malloc(sizeof(struct fable_buf_unix));
   new_buf->base.bufs = &new_buf->unix_vec;
@@ -162,7 +164,7 @@ struct fable_buf* fable_lend_write_buf_unixdomain(void* handle, const char* buf,
 
 }
 
-int fable_release_write_buf_unixdomain(void* handle, struct fable_buf* buf) {
+int fable_release_write_buf_unixdomain(struct fable_handle* handle, struct fable_buf* buf) {
 
   int fd = *((int*)handle);
 
@@ -196,14 +198,14 @@ int fable_release_write_buf_unixdomain(void* handle, struct fable_buf* buf) {
 
 }
 
-int fable_lend_read_buf_unixdomain(void* handle, char* buf, unsigned len) {
+int fable_lend_read_buf_unixdomain(struct fable_handle* handle, char* buf, unsigned len) {
 
   int fd = *((int*)handle);
   return read(fd, buf, len);
 
 }
 
-struct fable_buf* fable_get_read_buf_unixdomain(void* handle, unsigned len) {
+struct fable_buf* fable_get_read_buf_unixdomain(struct fable_handle* handle, unsigned len) {
 
   int malloc_sz = sizeof(struct fable_buf_unix) + len;
   if(malloc_sz > 4096) {
@@ -236,13 +238,13 @@ struct fable_buf* fable_get_read_buf_unixdomain(void* handle, unsigned len) {
 
 }
 
-void fable_release_read_buf_unixdomain(void* handle, struct fable_buf* buf) {
+void fable_release_read_buf_unixdomain(struct fable_handle* handle, struct fable_buf* buf) {
 
   free(buf); // == address of 'superstruct' fable_buf_unix
 
 }
 
-void fable_close_unixdomain(void* handle) {
+void fable_close_unixdomain(struct fable_handle* handle) {
 
   close(*((int*)handle));
   free(handle);

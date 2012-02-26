@@ -98,6 +98,7 @@ struct msghdr;
 
 #define fable_blocking_read fable_lend_read_buf
 
+#ifdef FABLE_TYPE
 static inline ssize_t fable_blocking_write(struct fable_handle *handle, const void *buf, size_t bufsize)
 {
   struct fable_buf *fbuf = fable_lend_write_buf(handle, buf, bufsize);
@@ -136,5 +137,6 @@ static inline ssize_t fable_blocking_sendmsg(struct fable_handle *handle, const 
   }
   return res;
 }
+#endif
 
 #endif

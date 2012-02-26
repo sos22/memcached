@@ -1,4 +1,4 @@
-#define FABLE_TYPE tcp
+#define FABLE_TYPE shmem_pipe
 
 /* -*- Mode: C; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
 /*
@@ -4073,7 +4073,7 @@ static int server_socket(const char *where,
 
     assert(transport == tcp_transport);
 
-    sfd = fable_listen_tcp(where);
+    sfd = fable_listen(where);
 
     if (!(listen_conn_add = conn_new(sfd, conn_listening,
                                      EV_READ | EV_PERSIST, 1,
@@ -4446,6 +4446,8 @@ int main (int argc, char **argv) {
     if (!sanitycheck()) {
         return EX_OSERR;
     }
+
+    fable_init();
 
     /* handle SIGINT */
     signal(SIGINT, sig_handler);
