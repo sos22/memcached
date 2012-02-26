@@ -14,6 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#define UNUSED_PARAMETER __attribute__((unused))
 
 struct fable_buf_tcp {
 
@@ -38,7 +39,7 @@ void fable_init_tcp()
 
 /* Possibly a bit dubious to be doing DNS lookups in here?  Might want
    to do that in a separate phase? */
-struct fable_handle *fable_connect_tcp(const char* name, int direction)
+struct fable_handle *fable_connect_tcp(const char* name, int UNUSED_PARAMETER direction)
 {
   const char *service;
   char *hostname;
@@ -52,12 +53,17 @@ struct fable_handle *fable_connect_tcp(const char* name, int direction)
   memcpy(hostname, name, service - name);
   hostname[service - name] = 0;
 
-  e = getaddrinfo(hostname, service, NULL, &ai);
-  free(hostname);
+  e = getaddrinfo(hostname, service + 1, NULL, &ai);
   if (e != 0) {
+    printf("Error %s looking up host %s (%s, service %s)\n",
+	   gai_strerror(e),
+	   hostname,
+	   name, service);
+    free(hostname);
     errno = e; /* XXX not even slightly sane */
     return NULL;
   }
+  free(hostname);
 
   fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
   if (fd == -1) {
@@ -81,12 +87,13 @@ struct fable_handle *fable_connect_tcp(const char* name, int direction)
 
 struct fable_handle *fable_listen_tcp(const char *interface, const char *service)
 {
-  struct addrinfo hints = {0};
+  struct addrinfo hints;
   struct addrinfo *ai;
   int e;
   int listen_fd;
   struct fable_handle_listen_tcp *handle;
 
+  memset(&hints, 0, sizeof(hints));
   hints.ai_flags = AI_PASSIVE;
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
@@ -123,7 +130,7 @@ struct fable_handle *fable_listen_tcp(const char *interface, const char *service
   return (struct fable_handle *)handle;
 }
 
-struct fable_handle *fable_accept_tcp(struct fable_handle *_listen_handle, int direction)
+struct fable_handle *fable_accept_tcp(struct fable_handle *_listen_handle, int UNUSED_PARAMETER direction)
 {
   struct fable_handle_listen_tcp *listen_handle = (void *)_listen_handle;
   struct fable_handle_tcp *acc_handle;
@@ -149,7 +156,9 @@ void fable_set_nonblocking_tcp(struct fable_handle *handle)
   fcntl(fd, F_SETFL, flags);
 }
 
-void fable_get_select_fds_tcp(struct fable_handle *handle, int type, int* maxfd, fd_set* rfds, fd_set* wfds, fd_set* efds, struct timeval* timeout)
+void fable_get_select_fds_tcp(struct fable_handle *handle, int type, int* maxfd,
+			      fd_set* rfds, fd_set* wfds, fd_set UNUSED_PARAMETER * efds,
+			      struct timeval UNUSED_PARAMETER * timeout)
 {
   int fd;
   if (type == FABLE_SELECT_ACCEPT)
@@ -165,7 +174,8 @@ void fable_get_select_fds_tcp(struct fable_handle *handle, int type, int* maxfd,
 
 }
 
-int fable_ready_tcp(struct fable_handle *handle, int type, fd_set* rfds, fd_set* wfds, fd_set* efds)
+int fable_ready_tcp(struct fable_handle *handle, int type, fd_set* rfds,
+		    fd_set* wfds, UNUSED_PARAMETER fd_set* efds)
 {
   int fd;
   if (type == FABLE_SELECT_ACCEPT)
@@ -179,7 +189,8 @@ int fable_ready_tcp(struct fable_handle *handle, int type, fd_set* rfds, fd_set*
 
 }
 
-struct fable_buf* fable_get_write_buf_tcp(struct fable_handle *handle, unsigned len)
+struct fable_buf* fable_get_write_buf_tcp(UNUSED_PARAMETER struct fable_handle *handle,
+					  unsigned len)
 {
   int malloc_sz = sizeof(struct fable_buf_tcp) + len;
   if(malloc_sz > 4096) {
@@ -198,7 +209,8 @@ struct fable_buf* fable_get_write_buf_tcp(struct fable_handle *handle, unsigned 
 
 }
 
-struct fable_buf* fable_lend_write_buf_tcp(struct fable_handle *handle, const char* buf, unsigned len)
+struct fable_buf* fable_lend_write_buf_tcp(UNUSED_PARAMETER struct fable_handle *handle,
+					   const char* buf, unsigned len)
 {
   struct fable_buf_tcp* new_buf = (struct fable_buf_tcp*)malloc(sizeof(struct fable_buf_tcp));
   new_buf->base.bufs = &new_buf->tcp_vec;
@@ -288,7 +300,8 @@ struct fable_buf* fable_get_read_buf_tcp(struct fable_handle *handle, unsigned l
 
 }
 
-void fable_release_read_buf_tcp(struct fable_handle *handle, struct fable_buf* buf)
+void fable_release_read_buf_tcp(UNUSED_PARAMETER struct fable_handle *handle,
+				struct fable_buf* buf)
 {
   free(buf); // == address of 'superstruct' fable_buf_unix
 
@@ -307,8 +320,10 @@ void fable_close_tcp(struct fable_handle *handle)
 const char *fable_handle_name_tcp(struct fable_handle *handle)
 {
   struct fable_handle_tcp *h = (struct fable_handle_tcp *)handle;
-  if (!h->name)
-    asprintf(&h->name, "FABLE:%d", h->fd);
+  if (!h->name) {
+    int r = asprintf(&h->name, "FABLE:%d", h->fd);
+    (void)r;
+  }
   return h->name;
 }
 
@@ -318,7 +333,8 @@ int fable_get_fd_tcp(struct fable_handle *handle)
   return h->fd;
 }
 
-void fable_abandon_write_buf_tcp(struct fable_handle *handle, struct fable_buf *buf)
+void fable_abandon_write_buf_tcp(UNUSED_PARAMETER struct fable_handle *handle,
+				 struct fable_buf *buf)
 {
   free(buf);
 }

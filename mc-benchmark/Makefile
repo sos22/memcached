@@ -18,7 +18,7 @@ PREFIX= /usr/local
 INSTALL_BIN= $(PREFIX)/bin
 INSTALL= cp -p
 
-BENCHOBJ = ae.o anet.o mc-benchmark.o sds.o adlist.o zmalloc.o
+BENCHOBJ = ae.o anet.o mc-benchmark.o sds.o adlist.o zmalloc.o fable_tcp.o
 
 BENCHPRGNAME = mc-benchmark
 
@@ -38,3 +38,6 @@ dep:
 
 bench:
 	./mc-benchmark
+
+fable_tcp.o: ../fable/fable_tcp.c
+	$(CC) -c $(CFLAGS) $(DEBUG) $(COMPILE_TIME) $<

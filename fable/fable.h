@@ -120,7 +120,7 @@ static inline ssize_t fable_blocking_write(struct fable_handle *handle, const vo
 
 static inline ssize_t fable_blocking_sendmsg(struct fable_handle *handle, const struct msghdr *hdr)
 {
-  int i;
+  unsigned i;
   ssize_t res = 0;
   for (i = 0; i < hdr->msg_iovlen; i++) {
     ssize_t r = fable_blocking_write(handle, hdr->msg_iov[i].iov_base, hdr->msg_iov[i].iov_len);
@@ -132,7 +132,7 @@ static inline ssize_t fable_blocking_sendmsg(struct fable_handle *handle, const 
     } else {
       res += r;
     }
-    if (r != hdr->msg_iov[i].iov_len)
+    if (r != (ssize_t)hdr->msg_iov[i].iov_len)
       break;
   }
   return res;

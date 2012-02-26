@@ -82,7 +82,7 @@ static struct config {
 
 typedef struct _client {
     int state;
-    int fd;
+    struct fable_handle *fd;
     sds obuf;
     sds ibuf;
     int mbulk;          /* Number of elements in an mbulk reply */
@@ -115,7 +115,7 @@ static void freeClient(client c) {
     aeDeleteFileEvent(config.el,c->fd,AE_READABLE);
     sdsfree(c->ibuf);
     sdsfree(c->obuf);
-    close(c->fd);
+    fable_close(c->fd);
     zfree(c);
     config.liveclients--;
     ln = listSearchKey(config.clients,c);
@@ -227,7 +227,7 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask)
     MCB_NOTUSED(fd);
     MCB_NOTUSED(mask);
 
-    nread = read(c->fd,buf,sizeof(buf));
+    nread = fable_blocking_read(c->fd,buf,sizeof(buf));
     if (nread == -1) {
         fprintf(stderr, "Reading from socket: %s\n", strerror(errno));
         freeClient(c);
@@ -297,7 +297,7 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask)
     if (sdslen(c->obuf) > c->written) {
         void *ptr = c->obuf+c->written;
         int len = sdslen(c->obuf) - c->written;
-        int nwritten = write(c->fd, ptr, len);
+        int nwritten = fable_blocking_write(c->fd, ptr, len);
         if (nwritten == -1) {
             if (errno != EPIPE)
                 fprintf(stderr, "Writing to socket: %s\n", strerror(errno));
@@ -318,7 +318,7 @@ static client createClient(void) {
     char err[ANET_ERR_LEN];
 
     c->fd = anetTcpNonBlockConnect(err,config.hostip,config.hostport);
-    if (c->fd == ANET_ERR) {
+    if (c->fd == NULL) {
         zfree(c);
         fprintf(stderr,"Connect: %s\n",err);
         return NULL;

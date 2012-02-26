@@ -19,13 +19,6 @@ static int aeApiCreate(aeEventLoop *eventLoop) {
     return 0;
 }
 
-static void aeApiFree(aeEventLoop *eventLoop) {
-    aeApiState *state = eventLoop->apidata;
-
-    close(state->epfd);
-    zfree(state);
-}
-
 static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
     aeApiState *state = eventLoop->apidata;
     struct epoll_event ee;
@@ -86,6 +79,3 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     return numevents;
 }
 
-static char *aeApiName(void) {
-    return "epoll";
-}

@@ -33,6 +33,9 @@
 #ifndef __AE_H__
 #define __AE_H__
 
+#define FABLE_TYPE tcp
+#include "../fable/fable.h"
+
 #define AE_SETSIZE (1024*10)    /* Max number of fd supported */
 
 #define AE_OK 0
@@ -99,19 +102,14 @@ typedef struct aeEventLoop {
 
 /* Prototypes */
 aeEventLoop *aeCreateEventLoop(void);
-void aeDeleteEventLoop(aeEventLoop *eventLoop);
 void aeStop(aeEventLoop *eventLoop);
-int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
+int aeCreateFileEvent(aeEventLoop *eventLoop, struct fable_handle *fd, int mask,
         aeFileProc *proc, void *clientData);
-void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int mask);
+void aeDeleteFileEvent(aeEventLoop *eventLoop, struct fable_handle *fd, int mask);
 long long aeCreateTimeEvent(aeEventLoop *eventLoop, long long milliseconds,
         aeTimeProc *proc, void *clientData,
         aeEventFinalizerProc *finalizerProc);
 int aeDeleteTimeEvent(aeEventLoop *eventLoop, long long id);
-int aeProcessEvents(aeEventLoop *eventLoop, int flags);
-int aeWait(int fd, int mask, long long milliseconds);
 void aeMain(aeEventLoop *eventLoop);
-char *aeGetApiName(void);
-void aeSetBeforeSleepProc(aeEventLoop *eventLoop, aeBeforeSleepProc *beforesleep);
 
 #endif
