@@ -1,3 +1,5 @@
+#define FABLE_TYPE tcp
+
 /* -*- Mode: C; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
 /*
  *  memcached - memory caching daemon
@@ -22,6 +24,8 @@
 #include <sys/uio.h>
 #include <ctype.h>
 #include <stdarg.h>
+
+#include "fable/fable.h"
 
 /* some POSIX systems need the following definition
  * to get mlockall flags out of sys/mman.h.  */
@@ -58,7 +62,6 @@
  * forward declarations
  */
 static void drive_machine(conn *c);
-static int new_socket(struct addrinfo *ai);
 static int try_read_command(conn *c);
 
 enum try_read_result {
@@ -348,10 +351,12 @@ static const char *prot_text(enum protocol prot) {
     return rv;
 }
 
-conn *conn_new(const int sfd, enum conn_states init_state,
-                const int event_flags,
-                const int read_buffer_size, enum network_transport transport,
-                struct event_base *base) {
+conn *conn_new(struct fable_handle *sfd,
+               enum conn_states init_state,
+               const int event_flags,
+               const int read_buffer_size, enum network_transport transport,
+               struct event_base *base)
+{
     conn *c = conn_from_freelist();
 
     if (NULL == c) {
@@ -409,20 +414,22 @@ conn *conn_new(const int sfd, enum conn_states init_state,
 
     if (settings.verbose > 1) {
         if (init_state == conn_listening) {
-            fprintf(stderr, "<%d server listening (%s)\n", sfd,
+            fprintf(stderr, "<%s server listening (%s)\n", fable_handle_name(sfd),
                 prot_text(c->protocol));
         } else if (IS_UDP(transport)) {
-            fprintf(stderr, "<%d server listening (udp)\n", sfd);
+            fprintf(stderr, "<%s server listening (udp)\n", fable_handle_name(sfd));
         } else if (c->protocol == negotiating_prot) {
-            fprintf(stderr, "<%d new auto-negotiating client connection\n",
-                    sfd);
+            fprintf(stderr, "<%s new auto-negotiating client connection\n",
+                    fable_handle_name(sfd));
         } else if (c->protocol == ascii_prot) {
-            fprintf(stderr, "<%d new ascii client connection.\n", sfd);
+            fprintf(stderr, "<%s new ascii client connection.\n",
+                    fable_handle_name(sfd));
         } else if (c->protocol == binary_prot) {
-            fprintf(stderr, "<%d new binary client connection.\n", sfd);
+            fprintf(stderr, "<%s new binary client connection.\n",
+                    fable_handle_name(sfd));
         } else {
-            fprintf(stderr, "<%d new unknown (%d) client connection\n",
-                sfd, c->protocol);
+            fprintf(stderr, "<%s new unknown (%d) client connection\n",
+                    fable_handle_name(sfd), c->protocol);
             assert(false);
         }
     }
@@ -449,7 +456,7 @@ conn *conn_new(const int sfd, enum conn_states init_state,
 
     c->noreply = false;
 
-    event_set(&c->event, sfd, event_flags, event_handler, (void *)c);
+    event_set(&c->event, fable_get_fd(sfd), event_flags, event_handler, (void *)c);
     event_base_set(base, &c->event);
     c->ev_flags = event_flags;
 
@@ -538,10 +545,10 @@ static void conn_close(conn *c) {
     event_del(&c->event);
 
     if (settings.verbose > 1)
-        fprintf(stderr, "<%d connection closed.\n", c->sfd);
+        fprintf(stderr, "<%s connection closed.\n", fable_handle_name(c->sfd));
 
     MEMCACHED_CONN_RELEASE(c->sfd);
-    close(c->sfd);
+    fable_close(c->sfd);
     pthread_mutex_lock(&conn_lock);
     allow_new_conns = true;
     pthread_mutex_unlock(&conn_lock);
@@ -645,8 +652,8 @@ static void conn_set_state(conn *c, enum conn_states state) {
 
     if (state != c->state) {
         if (settings.verbose > 2) {
-            fprintf(stderr, "%d: going from %s to %s\n",
-                    c->sfd, state_text(c->state),
+            fprintf(stderr, "%s: going from %s to %s\n",
+                    fable_handle_name(c->sfd), state_text(c->state),
                     state_text(state));
         }
 
@@ -790,14 +797,14 @@ static void out_string(conn *c, const char *str) {
 
     if (c->noreply) {
         if (settings.verbose > 1)
-            fprintf(stderr, ">%d NOREPLY %s\n", c->sfd, str);
+            fprintf(stderr, ">%s NOREPLY %s\n", fable_handle_name(c->sfd), str);
         c->noreply = false;
         conn_set_state(c, conn_new_cmd);
         return;
     }
 
     if (settings.verbose > 1)
-        fprintf(stderr, ">%d %s\n", c->sfd, str);
+        fprintf(stderr, ">%s %s\n", fable_handle_name(c->sfd), str);
 
     /* Nuke a partial output... */
     c->msgcurr = 0;
@@ -944,10 +951,10 @@ static void add_bin_header(conn *c, uint16_t err, uint8_t hdr_len, uint16_t key_
 
     if (settings.verbose > 1) {
         int ii;
-        fprintf(stderr, ">%d Writing bin response:", c->sfd);
+        fprintf(stderr, ">%s Writing bin response:", fable_handle_name(c->sfd));
         for (ii = 0; ii < sizeof(header->bytes); ++ii) {
             if (ii % 4 == 0) {
-                fprintf(stderr, "\n>%d  ", c->sfd);
+                fprintf(stderr, "\n>%s  ", fable_handle_name(c->sfd));
             }
             fprintf(stderr, " 0x%02x", header->bytes[ii]);
         }
@@ -992,11 +999,11 @@ static void write_bin_error(conn *c, protocol_binary_response_status err, int sw
     default:
         assert(false);
         errstr = "UNHANDLED ERROR";
-        fprintf(stderr, ">%d UNHANDLED ERROR: %d\n", c->sfd, err);
+        fprintf(stderr, ">%s UNHANDLED ERROR: %d\n", fable_handle_name(c->sfd), err);
     }
 
     if (settings.verbose > 1) {
-        fprintf(stderr, ">%d Writing an error: %s\n", c->sfd, errstr);
+        fprintf(stderr, ">%s Writing an error: %s\n", fable_handle_name(c->sfd), errstr);
     }
 
     len = strlen(errstr);
@@ -1203,7 +1210,7 @@ static void process_bin_touch(conn *c) {
     if (settings.verbose > 1) {
         int ii;
         /* May be GAT/GATQ/etc */
-        fprintf(stderr, "<%d TOUCH ", c->sfd);
+        fprintf(stderr, "<%s TOUCH ", fable_handle_name(c->sfd));
         for (ii = 0; ii < nkey; ++ii) {
             fprintf(stderr, "%c", key[ii]);
         }
@@ -1292,7 +1299,7 @@ static void process_bin_get(conn *c) {
 
     if (settings.verbose > 1) {
         int ii;
-        fprintf(stderr, "<%d GET ", c->sfd);
+        fprintf(stderr, "<%s GET ", fable_handle_name(c->sfd));
         for (ii = 0; ii < nkey; ++ii) {
             fprintf(stderr, "%c", key[ii]);
         }
@@ -1477,7 +1484,7 @@ static void process_bin_stat(conn *c) {
 
     if (settings.verbose > 1) {
         int ii;
-        fprintf(stderr, "<%d STATS ", c->sfd);
+        fprintf(stderr, "<%s STATS ", fable_handle_name(c->sfd));
         for (ii = 0; ii < nkey; ++ii) {
             fprintf(stderr, "%c", subcommand[ii]);
         }
@@ -1554,14 +1561,14 @@ static void bin_read_key(conn *c, enum bin_substates next_substate, int extra) {
 
         if (nsize != c->rsize) {
             if (settings.verbose > 1) {
-                fprintf(stderr, "%d: Need to grow buffer from %lu to %lu\n",
-                        c->sfd, (unsigned long)c->rsize, (unsigned long)nsize);
+                fprintf(stderr, "%s: Need to grow buffer from %lu to %lu\n",
+                        fable_handle_name(c->sfd), (unsigned long)c->rsize, (unsigned long)nsize);
             }
             char *newm = realloc(c->rbuf, nsize);
             if (newm == NULL) {
                 if (settings.verbose) {
-                    fprintf(stderr, "%d: Failed to grow buffer.. closing connection\n",
-                            c->sfd);
+                    fprintf(stderr, "%s: Failed to grow buffer.. closing connection\n",
+                            fable_handle_name(c->sfd));
                 }
                 conn_set_state(c, conn_closing);
                 return;
@@ -1576,7 +1583,7 @@ static void bin_read_key(conn *c, enum bin_substates next_substate, int extra) {
             memmove(c->rbuf, c->rcurr, c->rbytes);
             c->rcurr = c->rbuf;
             if (settings.verbose > 1) {
-                fprintf(stderr, "%d: Repack input buffer\n", c->sfd);
+                fprintf(stderr, "%s: Repack input buffer\n", fable_handle_name(c->sfd));
             }
         }
     }
@@ -1590,8 +1597,8 @@ static void bin_read_key(conn *c, enum bin_substates next_substate, int extra) {
 static void handle_binary_protocol_error(conn *c) {
     write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, 0);
     if (settings.verbose) {
-        fprintf(stderr, "Protocol error (opcode %02x), close connection %d\n",
-                c->binary_header.request.opcode, c->sfd);
+        fprintf(stderr, "Protocol error (opcode %02x), close connection %s\n",
+                c->binary_header.request.opcode, fable_handle_name(c->sfd));
     }
     c->write_and_go = conn_closing;
 }
@@ -1993,11 +2000,11 @@ static void process_bin_update(conn *c) {
     if (settings.verbose > 1) {
         int ii;
         if (c->cmd == PROTOCOL_BINARY_CMD_ADD) {
-            fprintf(stderr, "<%d ADD ", c->sfd);
+            fprintf(stderr, "<%s ADD ", fable_handle_name(c->sfd));
         } else if (c->cmd == PROTOCOL_BINARY_CMD_SET) {
-            fprintf(stderr, "<%d SET ", c->sfd);
+            fprintf(stderr, "<%s SET ", fable_handle_name(c->sfd));
         } else {
-            fprintf(stderr, "<%d REPLACE ", c->sfd);
+            fprintf(stderr, "<%s REPLACE ", fable_handle_name(c->sfd));
         }
         for (ii = 0; ii < nkey; ++ii) {
             fprintf(stderr, "%c", key[ii]);
@@ -2577,6 +2584,7 @@ static void server_stats(ADD_STAT add_stats, conn *c) {
     APPEND_STAT("auth_errors", "%llu", (unsigned long long)thread_stats.auth_errors);
     APPEND_STAT("bytes_read", "%llu", (unsigned long long)thread_stats.bytes_read);
     APPEND_STAT("bytes_written", "%llu", (unsigned long long)thread_stats.bytes_written);
+    APPEND_STAT("msgs_written", "%llu", (unsigned long long)thread_stats.msgs_written);
     APPEND_STAT("limit_maxbytes", "%llu", (unsigned long long)settings.maxbytes);
     APPEND_STAT("accepting_conns", "%u", stats.accepting_conns);
     APPEND_STAT("listen_disabled_num", "%llu", (unsigned long long)stats.listen_disabled_num);
@@ -2800,7 +2808,7 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
 
 
                 if (settings.verbose > 1)
-                    fprintf(stderr, ">%d sending key %s\n", c->sfd, ITEM_key(it));
+                    fprintf(stderr, ">%s sending key %s\n", fable_handle_name(c->sfd), ITEM_key(it));
 
                 /* item_get() has incremented it->refcount for us */
                 pthread_mutex_lock(&c->thread->stats.mutex);
@@ -2841,7 +2849,7 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
     }
 
     if (settings.verbose > 1)
-        fprintf(stderr, ">%d END\n", c->sfd);
+        fprintf(stderr, ">%s END\n", fable_handle_name(c->sfd));
 
     /*
         If the loop was terminated because of out-of-memory, it is not
@@ -3228,7 +3236,7 @@ static void process_command(conn *c, char *command) {
     MEMCACHED_PROCESS_COMMAND_START(c->sfd, c->rcurr, c->rbytes);
 
     if (settings.verbose > 1)
-        fprintf(stderr, "<%d %s\n", c->sfd, command);
+        fprintf(stderr, "<%s %s\n", fable_handle_name(c->sfd), command);
 
     /*
      * for commands set/add/replace, we build an item and read the data
@@ -3403,7 +3411,7 @@ static int try_read_command(conn *c) {
         }
 
         if (settings.verbose > 1) {
-            fprintf(stderr, "%d: Client using the %s protocol\n", c->sfd,
+            fprintf(stderr, "%s: Client using the %s protocol\n", fable_handle_name(c->sfd),
                     prot_text(c->protocol));
         }
     }
@@ -3420,7 +3428,7 @@ static int try_read_command(conn *c) {
                 memmove(c->rbuf, c->rcurr, c->rbytes);
                 c->rcurr = c->rbuf;
                 if (settings.verbose > 1) {
-                    fprintf(stderr, "%d: Realign input buffer\n", c->sfd);
+                    fprintf(stderr, "%s: Realign input buffer\n", fable_handle_name(c->sfd));
                 }
             }
 #endif
@@ -3430,10 +3438,10 @@ static int try_read_command(conn *c) {
             if (settings.verbose > 1) {
                 /* Dump the packet before we convert it to host order */
                 int ii;
-                fprintf(stderr, "<%d Read binary protocol data:", c->sfd);
+                fprintf(stderr, "<%s Read binary protocol data:", fable_handle_name(c->sfd));
                 for (ii = 0; ii < sizeof(req->bytes); ++ii) {
                     if (ii % 4 == 0) {
-                        fprintf(stderr, "\n<%d   ", c->sfd);
+                        fprintf(stderr, "\n<%s   ", fable_handle_name(c->sfd));
                     }
                     fprintf(stderr, " 0x%02x", req->bytes[ii]);
                 }
@@ -3529,8 +3537,10 @@ static enum try_read_result try_read_udp(conn *c) {
     assert(c != NULL);
 
     c->request_addr_size = sizeof(c->request_addr);
-    res = recvfrom(c->sfd, c->rbuf, c->rsize,
-                   0, &c->request_addr, &c->request_addr_size);
+    //    res = recvfrom(c->sfd, c->rbuf, c->rsize,
+    //                   0, &c->request_addr, &c->request_addr_size);
+    res = fable_blocking_read(c->sfd, c->rbuf, c->rsize);
+    c->request_addr_size = 0;
     if (res > 8) {
         unsigned char *buf = (unsigned char *)c->rbuf;
         pthread_mutex_lock(&c->thread->stats.mutex);
@@ -3601,7 +3611,7 @@ static enum try_read_result try_read_network(conn *c) {
         }
 
         int avail = c->rsize - c->rbytes;
-        res = read(c->sfd, c->rbuf + c->rbytes, avail);
+        res = fable_blocking_read(c->sfd, c->rbuf + c->rbytes, avail);
         if (res > 0) {
             pthread_mutex_lock(&c->thread->stats.mutex);
             c->thread->stats.bytes_read += res;
@@ -3634,7 +3644,7 @@ static bool update_event(conn *c, const int new_flags) {
     if (c->ev_flags == new_flags)
         return true;
     if (event_del(&c->event) == -1) return false;
-    event_set(&c->event, c->sfd, new_flags, event_handler, (void *)c);
+    event_set(&c->event, fable_get_fd(c->sfd), new_flags, event_handler, (void *)c);
     event_base_set(base, &c->event);
     c->ev_flags = new_flags;
     if (event_add(&c->event, 0) == -1) return false;
@@ -3650,15 +3660,9 @@ void do_accept_new_conns(const bool do_accept) {
     for (next = listen_conn; next; next = next->next) {
         if (do_accept) {
             update_event(next, EV_READ | EV_PERSIST);
-            if (listen(next->sfd, settings.backlog) != 0) {
-                perror("listen");
-            }
         }
         else {
             update_event(next, 0);
-            if (listen(next->sfd, 0) != 0) {
-                perror("listen");
-            }
         }
     }
 
@@ -3697,10 +3701,11 @@ static enum transmit_result transmit(conn *c) {
         ssize_t res;
         struct msghdr *m = &c->msglist[c->msgcurr];
 
-        res = sendmsg(c->sfd, m, 0);
+        res = fable_blocking_sendmsg(c->sfd, m);
         if (res > 0) {
             pthread_mutex_lock(&c->thread->stats.mutex);
             c->thread->stats.bytes_written += res;
+            c->thread->stats.msgs_written++;
             pthread_mutex_unlock(&c->thread->stats.mutex);
 
             /* We've written some of the data. Remove the completed
@@ -3745,12 +3750,10 @@ static enum transmit_result transmit(conn *c) {
 
 static void drive_machine(conn *c) {
     bool stop = false;
-    int sfd, flags = 1;
-    socklen_t addrlen;
-    struct sockaddr_storage addr;
     int nreqs = settings.reqs_per_event;
     int res;
     const char *str;
+    struct fable_handle *sfd;
 
     assert(c != NULL);
 
@@ -3758,8 +3761,7 @@ static void drive_machine(conn *c) {
 
         switch(c->state) {
         case conn_listening:
-            addrlen = sizeof(addr);
-            if ((sfd = accept(c->sfd, (struct sockaddr *)&addr, &addrlen)) == -1) {
+            if ((sfd = fable_accept(c->sfd, FABLE_DIRECTION_DUPLEX)) == NULL) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     /* these are transient, so don't log anything */
                     stop = true;
@@ -3774,24 +3776,18 @@ static void drive_machine(conn *c) {
                 }
                 break;
             }
-            if ((flags = fcntl(sfd, F_GETFL, 0)) < 0 ||
-                fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0) {
-                perror("setting O_NONBLOCK");
-                close(sfd);
-                break;
-            }
 
             if (settings.maxconns_fast &&
                 stats.curr_conns + stats.reserved_fds >= settings.maxconns - 1) {
                 str = "ERROR Too many open connections\r\n";
-                res = write(sfd, str, strlen(str));
-                close(sfd);
+                res = fable_blocking_write(sfd, str, strlen(str));
+                fable_close(sfd);
                 STATS_LOCK();
                 stats.rejected_conns++;
                 STATS_UNLOCK();
             } else {
                 dispatch_conn_new(sfd, conn_new_cmd, EV_READ | EV_PERSIST,
-                                     DATA_BUFFER_SIZE, tcp_transport);
+                                  DATA_BUFFER_SIZE, tcp_transport);
             }
 
             stop = true;
@@ -3885,7 +3881,7 @@ static void drive_machine(conn *c) {
             }
 
             /*  now try reading from the socket */
-            res = read(c->sfd, c->ritem, c->rlbytes);
+            res = fable_blocking_read(c->sfd, c->ritem, c->rlbytes);
             if (res > 0) {
                 pthread_mutex_lock(&c->thread->stats.mutex);
                 c->thread->stats.bytes_read += res;
@@ -3940,7 +3936,7 @@ static void drive_machine(conn *c) {
             }
 
             /*  now try reading from the socket */
-            res = read(c->sfd, c->rbuf, c->rsize > c->sbytes ? c->sbytes : c->rsize);
+            res = fable_blocking_read(c->sfd, c->rbuf, c->rsize > c->sbytes ? c->sbytes : c->rsize);
             if (res > 0) {
                 pthread_mutex_lock(&c->thread->stats.mutex);
                 c->thread->stats.bytes_read += res;
@@ -4063,7 +4059,7 @@ void event_handler(const int fd, const short which, void *arg) {
     c->which = which;
 
     /* sanity */
-    if (fd != c->sfd) {
+    if (fd != fable_get_fd(c->sfd)) {
         if (settings.verbose > 0)
             fprintf(stderr, "Catastrophic: event fd doesn't match conn fd!\n");
         conn_close(c);
@@ -4074,58 +4070,6 @@ void event_handler(const int fd, const short which, void *arg) {
 
     /* wait for next event */
     return;
-}
-
-static int new_socket(struct addrinfo *ai) {
-    int sfd;
-    int flags;
-
-    if ((sfd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol)) == -1) {
-        return -1;
-    }
-
-    if ((flags = fcntl(sfd, F_GETFL, 0)) < 0 ||
-        fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0) {
-        perror("setting O_NONBLOCK");
-        close(sfd);
-        return -1;
-    }
-    return sfd;
-}
-
-
-/*
- * Sets a socket's send buffer size to the maximum allowed by the system.
- */
-static void maximize_sndbuf(const int sfd) {
-    socklen_t intsize = sizeof(int);
-    int last_good = 0;
-    int min, max, avg;
-    int old_size;
-
-    /* Start with the default size. */
-    if (getsockopt(sfd, SOL_SOCKET, SO_SNDBUF, &old_size, &intsize) != 0) {
-        if (settings.verbose > 0)
-            perror("getsockopt(SO_SNDBUF)");
-        return;
-    }
-
-    /* Binary-search for the real maximum. */
-    min = old_size;
-    max = MAX_SENDBUF_SIZE;
-
-    while (min <= max) {
-        avg = ((unsigned int)(min + max)) / 2;
-        if (setsockopt(sfd, SOL_SOCKET, SO_SNDBUF, (void *)&avg, intsize) == 0) {
-            last_good = avg;
-            min = avg + 1;
-        } else {
-            max = avg - 1;
-        }
-    }
-
-    if (settings.verbose > 1)
-        fprintf(stderr, "<%d send buffer was %d, now %d\n", sfd, old_size, last_good);
 }
 
 /**
@@ -4140,138 +4084,30 @@ static void maximize_sndbuf(const int sfd) {
 static int server_socket(const char *interface,
                          int port,
                          enum network_transport transport,
-                         FILE *portnumber_file) {
-    int sfd;
-    struct linger ling = {0, 0};
-    struct addrinfo *ai;
-    struct addrinfo *next;
-    struct addrinfo hints = { .ai_flags = AI_PASSIVE,
-                              .ai_family = AF_UNSPEC };
+                         FILE *portnumber_file)
+{
     char port_buf[NI_MAXSERV];
-    int error;
-    int success = 0;
-    int flags =1;
+    struct fable_handle *sfd;
+    conn *listen_conn_add;
 
-    hints.ai_socktype = IS_UDP(transport) ? SOCK_DGRAM : SOCK_STREAM;
+    assert(transport == tcp_transport);
 
     if (port == -1) {
         port = 0;
     }
     snprintf(port_buf, sizeof(port_buf), "%d", port);
-    error= getaddrinfo(interface, port_buf, &hints, &ai);
-    if (error != 0) {
-        if (error != EAI_SYSTEM)
-          fprintf(stderr, "getaddrinfo(): %s\n", gai_strerror(error));
-        else
-          perror("getaddrinfo()");
-        return 1;
+    sfd = fable_listen_tcp(interface, port_buf);
+
+    if (!(listen_conn_add = conn_new(sfd, conn_listening,
+                                     EV_READ | EV_PERSIST, 1,
+                                     transport, main_base))) {
+        fprintf(stderr, "failed to create listening connection\n");
+        exit(EXIT_FAILURE);
     }
+    listen_conn_add->next = listen_conn;
+    listen_conn = listen_conn_add;
 
-    for (next= ai; next; next= next->ai_next) {
-        conn *listen_conn_add;
-        if ((sfd = new_socket(next)) == -1) {
-            /* getaddrinfo can return "junk" addresses,
-             * we make sure at least one works before erroring.
-             */
-            if (errno == EMFILE) {
-                /* ...unless we're out of fds */
-                perror("server_socket");
-                exit(EX_OSERR);
-            }
-            continue;
-        }
-
-#ifdef IPV6_V6ONLY
-        if (next->ai_family == AF_INET6) {
-            error = setsockopt(sfd, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &flags, sizeof(flags));
-            if (error != 0) {
-                perror("setsockopt");
-                close(sfd);
-                continue;
-            }
-        }
-#endif
-
-        setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, (void *)&flags, sizeof(flags));
-        if (IS_UDP(transport)) {
-            maximize_sndbuf(sfd);
-        } else {
-            error = setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&flags, sizeof(flags));
-            if (error != 0)
-                perror("setsockopt");
-
-            error = setsockopt(sfd, SOL_SOCKET, SO_LINGER, (void *)&ling, sizeof(ling));
-            if (error != 0)
-                perror("setsockopt");
-
-            error = setsockopt(sfd, IPPROTO_TCP, TCP_NODELAY, (void *)&flags, sizeof(flags));
-            if (error != 0)
-                perror("setsockopt");
-        }
-
-        if (bind(sfd, next->ai_addr, next->ai_addrlen) == -1) {
-            if (errno != EADDRINUSE) {
-                perror("bind()");
-                close(sfd);
-                freeaddrinfo(ai);
-                return 1;
-            }
-            close(sfd);
-            continue;
-        } else {
-            success++;
-            if (!IS_UDP(transport) && listen(sfd, settings.backlog) == -1) {
-                perror("listen()");
-                close(sfd);
-                freeaddrinfo(ai);
-                return 1;
-            }
-            if (portnumber_file != NULL &&
-                (next->ai_addr->sa_family == AF_INET ||
-                 next->ai_addr->sa_family == AF_INET6)) {
-                union {
-                    struct sockaddr_in in;
-                    struct sockaddr_in6 in6;
-                } my_sockaddr;
-                socklen_t len = sizeof(my_sockaddr);
-                if (getsockname(sfd, (struct sockaddr*)&my_sockaddr, &len)==0) {
-                    if (next->ai_addr->sa_family == AF_INET) {
-                        fprintf(portnumber_file, "%s INET: %u\n",
-                                IS_UDP(transport) ? "UDP" : "TCP",
-                                ntohs(my_sockaddr.in.sin_port));
-                    } else {
-                        fprintf(portnumber_file, "%s INET6: %u\n",
-                                IS_UDP(transport) ? "UDP" : "TCP",
-                                ntohs(my_sockaddr.in6.sin6_port));
-                    }
-                }
-            }
-        }
-
-        if (IS_UDP(transport)) {
-            int c;
-
-            for (c = 0; c < settings.num_threads_per_udp; c++) {
-                /* this is guaranteed to hit all threads because we round-robin */
-                dispatch_conn_new(sfd, conn_read, EV_READ | EV_PERSIST,
-                                  UDP_READ_BUFFER_SIZE, transport);
-            }
-        } else {
-            if (!(listen_conn_add = conn_new(sfd, conn_listening,
-                                             EV_READ | EV_PERSIST, 1,
-                                             transport, main_base))) {
-                fprintf(stderr, "failed to create listening connection\n");
-                exit(EXIT_FAILURE);
-            }
-            listen_conn_add->next = listen_conn;
-            listen_conn = listen_conn_add;
-        }
-    }
-
-    freeaddrinfo(ai);
-
-    /* Return zero iff we detected no errors in starting up connections */
-    return success == 0;
+    return 0;
 }
 
 static int server_sockets(int port, enum network_transport transport,
@@ -4309,84 +4145,6 @@ static int server_sockets(int port, enum network_transport transport,
         free(list);
         return ret;
     }
-}
-
-static int new_socket_unix(void) {
-    int sfd;
-    int flags;
-
-    if ((sfd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-        perror("socket()");
-        return -1;
-    }
-
-    if ((flags = fcntl(sfd, F_GETFL, 0)) < 0 ||
-        fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0) {
-        perror("setting O_NONBLOCK");
-        close(sfd);
-        return -1;
-    }
-    return sfd;
-}
-
-static int server_socket_unix(const char *path, int access_mask) {
-    int sfd;
-    struct linger ling = {0, 0};
-    struct sockaddr_un addr;
-    struct stat tstat;
-    int flags =1;
-    int old_umask;
-
-    if (!path) {
-        return 1;
-    }
-
-    if ((sfd = new_socket_unix()) == -1) {
-        return 1;
-    }
-
-    /*
-     * Clean up a previous socket file if we left it around
-     */
-    if (lstat(path, &tstat) == 0) {
-        if (S_ISSOCK(tstat.st_mode))
-            unlink(path);
-    }
-
-    setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, (void *)&flags, sizeof(flags));
-    setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&flags, sizeof(flags));
-    setsockopt(sfd, SOL_SOCKET, SO_LINGER, (void *)&ling, sizeof(ling));
-
-    /*
-     * the memset call clears nonstandard fields in some impementations
-     * that otherwise mess things up.
-     */
-    memset(&addr, 0, sizeof(addr));
-
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
-    assert(strcmp(addr.sun_path, path) == 0);
-    old_umask = umask( ~(access_mask&0777));
-    if (bind(sfd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
-        perror("bind()");
-        close(sfd);
-        umask(old_umask);
-        return 1;
-    }
-    umask(old_umask);
-    if (listen(sfd, settings.backlog) == -1) {
-        perror("listen()");
-        close(sfd);
-        return 1;
-    }
-    if (!(listen_conn = conn_new(sfd, conn_listening,
-                                 EV_READ | EV_PERSIST, 1,
-                                 local_transport, main_base))) {
-        fprintf(stderr, "failed to create listening connection\n");
-        exit(EXIT_FAILURE);
-    }
-
-    return 0;
 }
 
 /*
@@ -5149,15 +4907,6 @@ int main (int argc, char **argv) {
     /* initialise clock event */
     clock_handler(0, 0, 0);
 
-    /* create unix mode sockets after dropping privileges */
-    if (settings.socketpath != NULL) {
-        errno = 0;
-        if (server_socket_unix(settings.socketpath,settings.access)) {
-            vperror("failed to listen on UNIX socket: %s", settings.socketpath);
-            exit(EX_OSERR);
-        }
-    }
-
     /* create the listening socket, bind it, and init */
     if (settings.socketpath == NULL) {
         const char *portnumber_filename = getenv("MEMCACHED_PORT_FILENAME");
@@ -5191,12 +4940,14 @@ int main (int argc, char **argv) {
          */
 
         /* create the UDP listening socket and bind it */
+#if 0
         errno = 0;
         if (settings.udpport && server_sockets(settings.udpport, udp_transport,
                                               portnumber_file)) {
             vperror("failed to listen on UDP port %d", settings.udpport);
             exit(EX_OSERR);
         }
+#endif
 
         if (portnumber_file) {
             fclose(portnumber_file);

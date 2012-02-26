@@ -21,6 +21,8 @@
 #include "protocol_binary.h"
 #include "cache.h"
 
+struct fable_handle;
+
 #include "sasl_defs.h"
 
 /** Maximum length of a key. */
@@ -228,6 +230,7 @@ struct thread_stats {
     uint64_t          cas_misses;
     uint64_t          bytes_read;
     uint64_t          bytes_written;
+    uint64_t          msgs_written;
     uint64_t          flush_cmds;
     uint64_t          conn_yields; /* # of yields for connections (-R option)*/
     uint64_t          auth_cmds;
@@ -365,7 +368,7 @@ typedef struct {
  */
 typedef struct conn conn;
 struct conn {
-    int    sfd;
+    struct fable_handle *sfd;
     sasl_conn_t *sasl_conn;
     enum conn_states  state;
     enum bin_substates substate;
@@ -480,7 +483,7 @@ enum delta_result_type do_add_delta(conn *c, const char *key,
                                     const int64_t delta, char *buf,
                                     uint64_t *cas, const uint32_t hv);
 enum store_item_type do_store_item(item *item, int comm, conn* c, const uint32_t hv);
-conn *conn_new(const int sfd, const enum conn_states init_state, const int event_flags, const int read_buffer_size, enum network_transport transport, struct event_base *base);
+conn *conn_new(struct fable_handle *sfd, const enum conn_states init_state, const int event_flags, const int read_buffer_size, enum network_transport transport, struct event_base *base);
 extern int daemonize(int nochdir, int noclose);
 
 static inline int mutex_lock(pthread_mutex_t *mutex)
@@ -508,7 +511,7 @@ static inline int mutex_lock(pthread_mutex_t *mutex)
 
 void thread_init(int nthreads, struct event_base *main_base);
 int  dispatch_event_add(int thread, conn *c);
-void dispatch_conn_new(int sfd, enum conn_states init_state, int event_flags, int read_buffer_size, enum network_transport transport);
+void dispatch_conn_new(struct fable_handle *sfd, enum conn_states init_state, int event_flags, int read_buffer_size, enum network_transport transport);
 
 /* Lock wrappers for cache functions that are called from main loop. */
 enum delta_result_type add_delta(conn *c, const char *key,

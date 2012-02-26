@@ -1,3 +1,4 @@
+#define FABLE_TYPE tcp
 /* -*- Mode: C; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
 /*
  * Thread management for memcached.
@@ -11,6 +12,8 @@
 #include <string.h>
 #include <pthread.h>
 
+#include "fable/fable.h"
+
 #ifdef __sun
 #include <atomic.h>
 #endif
@@ -20,7 +23,7 @@
 /* An item in the connection queue. */
 typedef struct conn_queue_item CQ_ITEM;
 struct conn_queue_item {
-    int               sfd;
+    struct fable_handle *sfd;
     enum conn_states  init_state;
     int               event_flags;
     int               read_buffer_size;
@@ -323,10 +326,10 @@ static void thread_libevent_process(int fd, short which, void *arg) {
                 exit(1);
             } else {
                 if (settings.verbose > 0) {
-                    fprintf(stderr, "Can't listen for events on fd %d\n",
-                        item->sfd);
+                    fprintf(stderr, "Can't listen for events on fd %s\n",
+                            fable_handle_name(item->sfd));
                 }
-                close(item->sfd);
+                fable_close(item->sfd);
             }
         } else {
             c->thread = me;
@@ -343,7 +346,7 @@ static int last_thread = -1;
  * from the main thread, either during initialization (for UDP) or because
  * of an incoming connection.
  */
-void dispatch_conn_new(int sfd, enum conn_states init_state, int event_flags,
+void dispatch_conn_new(struct fable_handle *sfd, enum conn_states init_state, int event_flags,
                        int read_buffer_size, enum network_transport transport) {
     CQ_ITEM *item = cqi_new();
     int tid = (last_thread + 1) % settings.num_threads;
@@ -563,6 +566,7 @@ void threadlocal_stats_reset(void) {
         threads[ii].stats.cas_misses = 0;
         threads[ii].stats.bytes_read = 0;
         threads[ii].stats.bytes_written = 0;
+        threads[ii].stats.msgs_written = 0;
         threads[ii].stats.flush_cmds = 0;
         threads[ii].stats.conn_yields = 0;
         threads[ii].stats.auth_cmds = 0;
@@ -603,6 +607,7 @@ void threadlocal_stats_aggregate(struct thread_stats *stats) {
         stats->cas_misses += threads[ii].stats.cas_misses;
         stats->bytes_read += threads[ii].stats.bytes_read;
         stats->bytes_written += threads[ii].stats.bytes_written;
+        stats->msgs_written += threads[ii].stats.msgs_written;
         stats->flush_cmds += threads[ii].stats.flush_cmds;
         stats->conn_yields += threads[ii].stats.conn_yields;
         stats->auth_cmds += threads[ii].stats.auth_cmds;
