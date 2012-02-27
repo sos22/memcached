@@ -7,6 +7,9 @@
 #include <sys/socket.h>
 #include <sys/uio.h> // For struct iovec
 #include <stdlib.h> // For abort()
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
 
 struct fable_buf {
 
@@ -113,13 +116,17 @@ struct msghdr;
 static inline ssize_t fable_blocking_write(struct fable_handle *handle, const void *buf, size_t bufsize)
 {
   struct fable_buf *fbuf = fable_lend_write_buf(handle, buf, bufsize);
+  bufsize = fbuf->bufs[0].iov_len;
   int r = fable_release_write_buf(handle, fbuf);
-  if (r == 0)
+  if (r == 0) {
+    printf("fable release failed: %d\n", r);
     return 0;
+  }
   if (r == 1)
     return bufsize;
   if (r == -1) {
     int res = fbuf->written;
+    printf("fable release partial completion: %d, %s\n", res, strerror(errno));
     fable_abandon_write_buf(handle, fbuf);
     if (res == 0)
       return -1;
