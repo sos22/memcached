@@ -375,9 +375,14 @@ static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 	    ll_mask &= fired_mask;
 	    if (ll_mask == AE_READABLE) {
 		if (hl_mask == AE_READABLE) {
-		    fe->rfileProc(eventLoop,fe->handle,fe->clientData,AE_READABLE);
+		    do {
+			fe->rfileProc(eventLoop,fe->handle,fe->clientData,AE_READABLE);
+		    } while (fe->hl_mask == AE_READABLE && fable_handle_is_readable(fe->handle));
 		} else if (hl_mask == AE_WRITABLE) {
-		    fe->wfileProc(eventLoop,fe->handle,fe->clientData,AE_WRITABLE);
+		    do {
+			fe->wfileProc(eventLoop,fe->handle,fe->clientData,AE_WRITABLE);
+		    } while (fe->hl_mask == AE_WRITABLE &&
+			     fable_handle_is_writable(fe->handle));
 		} else {
 		    abort();
 		}
