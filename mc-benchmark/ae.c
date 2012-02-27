@@ -386,6 +386,12 @@ static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 		} else {
 		    abort();
 		}
+	    } else if (ll_mask == AE_WRITABLE) {
+	      assert(hl_mask & AE_WRITABLE);
+	      do {
+		fe->wfileProc(eventLoop,fe->handle,fe->clientData,AE_WRITABLE);
+	      } while (fe->hl_mask == AE_WRITABLE &&
+		       fable_handle_is_writable(fe->handle));
 	    } else if (ll_mask == 0) {
 	    } else {
 		abort();

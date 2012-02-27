@@ -21,7 +21,6 @@
 #include "cache.h"
 #include "libevent/event.h"
 
-#define FABLE_TYPE shmem_pipe
 #include "fable/fable.h"
 
 struct fable_handle;

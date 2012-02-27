@@ -33,7 +33,6 @@
 #ifndef __AE_H__
 #define __AE_H__
 
-#define FABLE_TYPE shmem_pipe
 #include "../fable/fable.h"
 
 #define AE_SETSIZE (1024*10)    /* Max number of fd supported */

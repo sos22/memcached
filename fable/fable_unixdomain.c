@@ -1,3 +1,8 @@
+#define _GNU_SOURCE
+
+#include <sys/types.h>
+
+#include <event.h>
 
 #include "io_helpers.h"
 #include "fable.h"
@@ -198,6 +203,10 @@ int fable_release_write_buf_unixdomain(struct fable_handle* handle, struct fable
 
 }
 
+void fable_abandon_write_buf_unixdomain(struct fable_handle *handle, struct fable_buf *buf) {
+  free(buf);
+}
+
 int fable_lend_read_buf_unixdomain(struct fable_handle* handle, char* buf, unsigned len) {
 
   int fd = *((int*)handle);
@@ -249,4 +258,66 @@ void fable_close_unixdomain(struct fable_handle* handle) {
   close(*((int*)handle));
   free(handle);
 
+}
+
+const char *fable_handle_name_unixdomain(struct fable_handle *handle)
+{
+  return "unixdomain";
+}
+
+int fable_get_fd_read_unixdomain(struct fable_handle *handle, int *read) {
+  *read = 1;
+  return *(int *)handle;
+}
+
+int fable_get_fd_write_unixdomain(struct fable_handle *handle, int *read) {
+  *read = 0;
+  return *(int *)handle;
+}
+
+/* These are only supposed to return true if the handle is
+   readable/writable but the underlying FD isn't.  Unix domain handles
+   are such simple wrappers around FDs that that never actually
+   happens. */
+int fable_handle_is_readable_unixdomain(struct fable_handle *handle) {
+  return 0;
+}
+int fable_handle_is_writable_unixdomain(struct fable_handle *handle) {
+  return 0;
+}
+
+static void libevent_event_handler(int fd, short which, void *ctxt)
+{
+  struct fable_event_unixdomain *evt = ctxt;
+  evt->handler(evt->handle, which, evt->ctxt);
+}
+
+void fable_add_event_unixdomain(struct fable_event_unixdomain *evt,
+				struct event_base *base,
+				struct fable_handle *handle,
+				short event_flags,
+				void (*handler)(struct fable_handle *handle,
+						short which,
+						void *ctxt),
+				void *ctxt)
+{
+  evt->handle = handle;
+  evt->handler = handler;
+  evt->ctxt = ctxt;
+  event_set(&evt->event, *(int *)handle, event_flags,
+	    libevent_event_handler, evt);
+  event_base_set(base, &evt->event);
+  if (event_add(&evt->event, 0) == -1)
+    abort();
+}
+
+void fable_event_del_unixdomain(struct fable_event_unixdomain *evt)
+{
+  event_del(&evt->event);
+}
+
+void fable_event_change_flags_unixdomain(struct fable_event_unixdomain *evt, short flags)
+{
+  fable_event_del_unixdomain(evt);
+  fable_add_event_unixdomain(evt, evt->event.ev_base, evt->handle, flags, evt->handler, evt->ctxt);
 }

@@ -31,7 +31,6 @@
 #ifndef ANET_H
 #define ANET_H
 
-#define FABLE_TYPE shmem_pipe
 #include "../fable/fable.h"
 
 #define ANET_OK 0

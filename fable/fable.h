@@ -1,4 +1,4 @@
-#define FABLE_TYPE shmem_pipe
+#define FABLE_TYPE unixdomain
 
 #ifndef FABLE_H
 #define FABLE_H
@@ -47,6 +47,10 @@ struct fable_buf {
 #define fable_handle_is_readable CONC(fable_handle_is_readable_, FABLE_TYPE)
 #define fable_handle_is_writable CONC(fable_handle_is_writable_, FABLE_TYPE)
 
+#define fable_event CONC(fable_event_, FABLE_TYPE)
+#define fable_add_event CONC(fable_add_event_, FABLE_TYPE)
+#define fable_event_del CONC(fable_event_del_, FABLE_TYPE)
+#define fable_event_change_flags CONC(fable_event_change_flags_, FABLE_TYPE)
 #endif
 
 #define FABLE_SELECT_READ 1
@@ -158,7 +162,7 @@ static inline ssize_t fable_blocking_sendmsg(struct fable_handle *handle, const 
 #endif
 
 #ifdef _EVENT_H_
-struct fable_event {
+struct fable_event_shmem_pipe {
   struct event send_event;
   struct event recv_event;
   struct event_base *base;
@@ -166,16 +170,27 @@ struct fable_event {
   void (*handler)(struct fable_handle *, short, void *);
   void *ctxt;
 };
-void fable_add_event(struct fable_event *evt,
-		     struct event_base *base,
-		     struct fable_handle *handle,
-		     short event_flags,
-		     void (*handler)(struct fable_handle *handle,
-				     short which, void *ctxt),
-		     void *ctxt);
-void fable_event_del(struct fable_event *evt);
-void fable_event_change_flags(struct fable_event *evt, short flags);
 
+struct fable_event_unixdomain {
+  struct event event;
+  struct fable_handle *handle;
+  void (*handler)(struct fable_handle *, short, void *);
+  void *ctxt;
+};
+
+#define mk_api(type)							\
+  void fable_add_event_ ## type (struct fable_event_ ## type *evt,	\
+				 struct event_base *base,		\
+				 struct fable_handle *handle,		\
+				 short event_flags,			\
+				 void (*handler)(struct fable_handle *handle, \
+						 short which, void *ctxt), \
+				 void *ctxt);				\
+  void fable_event_del_ ## type (struct fable_event_ ## type *evt);	\
+  void fable_event_change_flags_ ## type (struct fable_event_ ## type *evt, short flags);
+
+mk_api(shmem_pipe)
+mk_api(unixdomain)
 #endif
 
 #endif
