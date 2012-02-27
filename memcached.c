@@ -453,8 +453,6 @@ conn *conn_new(struct fable_handle *sfd,
 
     MEMCACHED_CONN_ALLOCATE(c->sfd);
 
-    printf("New connection %p\n", (void *)c);
-
     return c;
 }
 

@@ -1,4 +1,3 @@
-#undef NDEBUG
 /* Another kind of shared memory test.  The idea here is that we have
    a shared-memory region and a malloc-like thing for allocating from
    it, and we also have a couple of pipes.  Messages are sent by
@@ -64,7 +63,7 @@ typedef struct {
 #define SIMPLEX_SEND ((simplex_id_t){1})
 #define SIMPLEX_RECV ((simplex_id_t){0})
 
-#define MAX_ALLOC_NODES 10
+#define MAX_ALLOC_NODES 50
 
 struct shmem_simplex {
 	int fd;
@@ -1077,13 +1076,16 @@ int fable_handle_is_writable_shmem_pipe(struct fable_handle *handle)
 
 static void libevent_recv_handler(int fd, short which, void *ctxt)
 {
+  /* XXX should maybe re-insert the event if the handler doesn't clear
+     it completely? */
   struct fable_event *evt = ctxt;
   DBGPRINT("Receive event fired on %p\n", (void*)evt->handle);
   evt->handler(evt->handle, which, evt->ctxt);
 }
-
 static void libevent_send_handler(int fd, short which, void *ctxt)
 {
+  /* XXX should maybe re-insert the event if the handler doesn't clear
+     it completely? */
   struct fable_event *evt = ctxt;
   struct shmem_simplex *sp = simplex_from_fable_handle(evt->handle, SIMPLEX_SEND);
   DBGPRINT("Send event fired on %p\n", (void*)evt->handle);
@@ -1091,7 +1093,6 @@ static void libevent_send_handler(int fd, short which, void *ctxt)
   if (any_shared_space(sp))
     evt->handler(evt->handle, EV_WRITE | (which & ~EV_READ), evt->ctxt);
 }
-
 static void libevent_accept_handler(int fd, short which, void *ctxt)
 {
   struct fable_event *evt = ctxt;

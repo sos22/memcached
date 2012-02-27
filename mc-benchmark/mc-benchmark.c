@@ -135,7 +135,6 @@ static void freeAllClients(void) {
 static void resetClient(client c) {
     aeDeleteFileEvent(config.el,c->fd,AE_WRITABLE);
     aeDeleteFileEvent(config.el,c->fd,AE_READABLE);
-    printf("Ask for write notifications on %p\n", (void *)c->fd);
     aeCreateFileEvent(config.el,c->fd, AE_WRITABLE,writeHandler,c);
     sdsfree(c->ibuf);
     c->ibuf = sdsempty();
@@ -220,7 +219,6 @@ static int readLen(char *p, int *len) {
 
 static void readHandler(aeEventLoop *el, struct fable_handle *fd, void *privdata, int mask)
 {
-    printf("Read event on %p\n", (void *)fd);
     char buf[1024*16], *p;
     int nread, pos=0, len=0;
     client c = privdata;
@@ -286,7 +284,6 @@ done:
 
 static void writeHandler(aeEventLoop *el, struct fable_handle *fd, void *privdata, int mask)
 {
-    printf("Write event on %p\n", (void *)fd);
     client c = privdata;
     MCB_NOTUSED(el);
     MCB_NOTUSED(fd);
@@ -300,7 +297,6 @@ static void writeHandler(aeEventLoop *el, struct fable_handle *fd, void *privdat
         void *ptr = c->obuf+c->written;
         int len = sdslen(c->obuf) - c->written;
         int nwritten = fable_blocking_write(c->fd, ptr, len);
-	printf("Wrote %d bytes of %d\n", nwritten, len);
         if (nwritten == -1) {
             if (errno != EPIPE)
                 fprintf(stderr, "Writing to socket: %s\n", strerror(errno));
@@ -310,7 +306,6 @@ static void writeHandler(aeEventLoop *el, struct fable_handle *fd, void *privdat
         c->written += nwritten;
         if (sdslen(c->obuf) == c->written) {
             aeDeleteFileEvent(config.el,c->fd,AE_WRITABLE);
-	    printf("Ask for read events on %p\n", (void *)c->fd);
             aeCreateFileEvent(config.el,c->fd,AE_READABLE,readHandler,c);
             c->state = CLIENT_READREPLY;
         }
