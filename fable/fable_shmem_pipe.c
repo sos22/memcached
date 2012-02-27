@@ -64,6 +64,8 @@ typedef struct {
 #define SIMPLEX_SEND ((simplex_id_t){1})
 #define SIMPLEX_RECV ((simplex_id_t){0})
 
+#define MAX_ALLOC_NODES 10
+
 struct shmem_simplex {
 	int fd;
 
@@ -807,6 +809,7 @@ static int wait_for_returned_buffers(struct shmem_simplex *sp)
 	static int total_read;
 
 	DBGPRINT("Waiting for returned buffers on %p\n", (void *)sp);
+	assert(sp->nr_alloc_nodes <= MAX_ALLOC_NODES);
 	s = read(sp->fd, sp->rx_buf + sp->rx_buf_prod, sizeof(sp->rx_buf) - sp->rx_buf_prod);
 	if (s <= 0) {
 	  if(errno == ECONNRESET)
@@ -824,6 +827,7 @@ static int wait_for_returned_buffers(struct shmem_simplex *sp)
 			sp->rx_buf + sp->rx_buf_prod - (sp->rx_buf_prod % sizeof(struct extent)),
 			sp->rx_buf_prod % sizeof(struct extent));
 	sp->rx_buf_prod %= sizeof(struct extent);
+	assert(sp->nr_alloc_nodes <= MAX_ALLOC_NODES);
 	return 1;
 }
 
@@ -833,6 +837,8 @@ struct fable_buf* fable_get_write_buf_shmem_pipe(struct fable_handle* handle, un
   struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
   unsigned long offset;
   unsigned allocated_len = len;
+
+  assert(sp->nr_alloc_nodes <= MAX_ALLOC_NODES);
 
   while ((offset = alloc_shared_space(sp, &allocated_len)) == ALLOC_FAILED) {
     int wait_ret = wait_for_returned_buffers(sp);
@@ -851,6 +857,8 @@ struct fable_buf* fable_get_write_buf_shmem_pipe(struct fable_handle* handle, un
 
   if (!any_shared_space(sp))
     DBGPRINT("Allocated the last scrap of send buffer space...\n");
+
+  assert(sp->nr_alloc_nodes <= MAX_ALLOC_NODES);
 
   return &buf->base;
 }
@@ -1046,7 +1054,9 @@ void fable_abandon_write_buf_shmem_pipe(struct fable_handle *handle, struct fabl
   unsigned long offset = ((char*)fbuf->bufs[0].iov_base) - ((char*)sp->ring);
   DBGPRINT("abandon buffer [%lx,%lx) on %p\n",
 	 offset, offset + fbuf->bufs[0].iov_len, (void *)handle);
+  assert(sp->nr_alloc_nodes <= MAX_ALLOC_NODES);
   release_shared_space(sp, offset, fbuf->bufs[0].iov_len);
+  assert(sp->nr_alloc_nodes <= MAX_ALLOC_NODES);
   free(fbuf);
 }
 
