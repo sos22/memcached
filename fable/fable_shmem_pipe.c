@@ -1,3 +1,4 @@
+#undef NDEBUG
 /* Another kind of shared memory test.  The idea here is that we have
    a shared-memory region and a malloc-like thing for allocating from
    it, and we also have a couple of pipes.  Messages are sent by
@@ -48,7 +49,8 @@ static unsigned ring_order = 9;
 #define DBG(x) do { x; } while (0)
 #endif
 
-#define DBGPRINT printf
+//#define DBGPRINT printf
+#define DBGPRINT(...) do {} while (0)
 
 struct extent {
 	unsigned base;
@@ -312,6 +314,7 @@ alloc_shared_space(struct shmem_simplex *sp, unsigned* size_out)
 static void
 release_shared_space(struct shmem_simplex *sp, unsigned start, unsigned size)
 {
+	DBGPRINT("Release [%x,%x) on %p\n", start, start+size, (void *)sp);
 	struct alloc_node *lan = sp->last_freed_node;
 	assert(start <= ring_size);
 	assert(start + size <= ring_size);
@@ -713,9 +716,11 @@ struct fable_buf* fable_get_read_buf_shmem_pipe(struct fable_handle* handle, uns
     int k = read(sp->fd, (char *)sp->incoming + sp->incoming_bytes, sizeof(sp->incoming) - sp->incoming_bytes);
     if (k == 0) {
       errno = 0;
+      DBGPRINT("read failed: socket empty\n");
       return 0;
     }
     if (k < 0) {
+      DBGPRINT("read failed: error %s\n", strerror(errno));
       if(errno == ECONNRESET)
 	errno = 0;
       return 0;
@@ -731,13 +736,13 @@ struct fable_buf* fable_get_read_buf_shmem_pipe(struct fable_handle* handle, uns
   buf->iov.iov_len = (inc->size < len ? inc->size : len);
   buf->base.bufs = &buf->iov;
   buf->base.nbufs = 1;
-  return &buf->base;
 
+  DBGPRINT("return buffer %p\n", (void *)&buf->base);
+  return &buf->base;
 }
 
 void fable_release_read_buf_shmem_pipe(struct fable_handle* handle, struct fable_buf* fbuf) {
-  DBGPRINT("release read buf on %p\n", (void *)handle);
-
+  DBGPRINT("release read buf %p on %p\n", (void *)fbuf, (void *)handle);
   struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
   struct extent *inc = (struct extent*)(sp->incoming + sp->incoming_bytes_consumed);
   assert(((char*)sp->ring) + inc->base == fbuf->bufs[0].iov_base);
@@ -752,6 +757,7 @@ void fable_release_read_buf_shmem_pipe(struct fable_handle* handle, struct fable
     sp->incoming_bytes_consumed += sizeof(struct extent);
 
     if(sp->incoming_bytes_consumed - sp->incoming_bytes < sizeof(struct extent)) {
+      DBGPRINT("Shuffle incoming queue down.\n");
       memmove(sp->incoming, sp->incoming + sp->incoming_bytes_consumed, sp->incoming_bytes - sp->incoming_bytes_consumed);
       sp->incoming_bytes -= sp->incoming_bytes_consumed;
       sp->incoming_bytes_consumed = 0;
@@ -800,6 +806,7 @@ static int wait_for_returned_buffers(struct shmem_simplex *sp)
 	int s;
 	static int total_read;
 
+	DBGPRINT("Waiting for returned buffers on %p\n", (void *)sp);
 	s = read(sp->fd, sp->rx_buf + sp->rx_buf_prod, sizeof(sp->rx_buf) - sp->rx_buf_prod);
 	if (s <= 0) {
 	  if(errno == ECONNRESET)
@@ -842,6 +849,9 @@ struct fable_buf* fable_get_write_buf_shmem_pipe(struct fable_handle* handle, un
   buf->base.bufs = &buf->iov;
   buf->base.nbufs = 1;
 
+  if (!any_shared_space(sp))
+    DBGPRINT("Allocated the last scrap of send buffer space...\n");
+
   return &buf->base;
 }
 
@@ -857,8 +867,6 @@ int fable_release_write_buf_shmem_pipe(struct fable_handle* handle, struct fable
 
   // TODO: Blocking ops in nonblocking context
   write_all_fd(sp->fd, (char*)&ext, sizeof(ext), 1 /* Allow writing to closed socket */);
-
-  assert(sp->nr_alloc_nodes <= 3);
 
   return 1;
 }
@@ -971,6 +979,7 @@ int fable_lend_read_buf_shmem_pipe(struct fable_handle* handle, char* buf, unsig
 
   struct fable_buf* fbuf = fable_get_read_buf_shmem_pipe(handle, len);
   if(!fbuf) {
+    DBGPRINT("Failed to lend read buf; %s\n", strerror(errno));
     if(errno == 0)
       return 0;
     else
@@ -991,8 +1000,10 @@ int fable_lend_read_buf_shmem_pipe(struct fable_handle* handle, char* buf, unsig
 struct fable_buf* fable_lend_write_buf_shmem_pipe(struct fable_handle* handle, const char* buf, unsigned len) {
 
   struct fable_buf* fbuf = fable_get_write_buf_shmem_pipe(handle, len);
-  if(!fbuf)
+  if(!fbuf) {
+    DBGPRINT("fable_lend_write_buf_shmem_pipe: shared arena is full!\n");
     return 0;
+  }
 
   memcpy(fbuf->bufs[0].iov_base, buf, fbuf->bufs[0].iov_len);
   fbuf->written = fbuf->bufs[0].iov_len;
@@ -1033,6 +1044,8 @@ void fable_abandon_write_buf_shmem_pipe(struct fable_handle *handle, struct fabl
 {
   struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
   unsigned long offset = ((char*)fbuf->bufs[0].iov_base) - ((char*)sp->ring);
+  DBGPRINT("abandon buffer [%lx,%lx) on %p\n",
+	 offset, offset + fbuf->bufs[0].iov_len, (void *)handle);
   release_shared_space(sp, offset, fbuf->bufs[0].iov_len);
   free(fbuf);
 }
@@ -1046,7 +1059,10 @@ int fable_handle_is_readable_shmem_pipe(struct fable_handle *handle)
 int fable_handle_is_writable_shmem_pipe(struct fable_handle *handle)
 {
   struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
-  return any_shared_space(sp);
+  if (any_shared_space(sp))
+    return 1;
+  else
+    abort();
 }
 
 static void libevent_recv_handler(int fd, short which, void *ctxt)

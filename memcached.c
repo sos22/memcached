@@ -22,6 +22,7 @@
 #include <sys/uio.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "fable/fable.h"
 
@@ -451,6 +452,8 @@ conn *conn_new(struct fable_handle *sfd,
     STATS_UNLOCK();
 
     MEMCACHED_CONN_ALLOCATE(c->sfd);
+
+    printf("New connection %p\n", (void *)c);
 
     return c;
 }
@@ -3866,6 +3869,7 @@ static void drive_machine(conn *c) {
                 break;
             }
             if (res == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                printf("HELLO\n");
                 if (!update_event(c, EV_READ | EV_PERSIST)) {
                     if (settings.verbose > 0)
                         fprintf(stderr, "Couldn't update event\n");

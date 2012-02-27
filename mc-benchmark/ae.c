@@ -43,6 +43,8 @@
 
 #include "ae_epoll.c"
 
+#define DBG(...) do {} while (0)
+
 aeEventLoop *aeCreateEventLoop(void) {
     aeEventLoop *eventLoop;
     int i;
@@ -74,6 +76,7 @@ void aeStop(aeEventLoop *eventLoop) {
 int aeCreateFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask,
 		      aeFileProc *proc, void *clientData)
 {
+    DBG("aeCreateFileEvent(%p, %d)\n", (void *)sfd, mask);
     if (mask & AE_READABLE) {
 	int r;
 	int fd = fable_get_fd_read(sfd, &r);
@@ -98,8 +101,6 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask
 	assert(fd < AE_SETSIZE);
 	aeFileEvent *fe = &eventLoop->events[fd];
 
-	printf("Listen on fd %d for read=%d for writing to handle %p\n",
-	       fd, r, (void *)sfd);
 	if (aeApiAddEvent(eventLoop, fd, r ? AE_READABLE : AE_WRITABLE) == -1)
 	    abort();
 	fe->handle = sfd;
@@ -116,6 +117,7 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask
 
 void aeDeleteFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mask)
 {
+    DBG("aeDeleteFileEvent(%p, %d)\n", (void *)sfd, mask);
     if (mask & AE_READABLE) {
 	int r;
 	int fd = fable_get_fd_read(sfd, &r);
@@ -140,7 +142,7 @@ void aeDeleteFileEvent(aeEventLoop *eventLoop, struct fable_handle *sfd, int mas
 	int fd = fable_get_fd_write(sfd, &r);
 	aeFileEvent *fe = &eventLoop->events[fd];
 
-	printf("Delete write event on fd %d\n", fd);
+	DBG("Delete write event on fd %d\n", fd);
 	if (fe->hl_mask & AE_WRITABLE) {
 	    fe->hl_mask = fe->hl_mask & ~AE_WRITABLE;
 	    if (fd == eventLoop->maxfd &&
@@ -361,9 +363,9 @@ static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 
         numevents = aeApiPoll(eventLoop, tvp);
         for (j = 0; j < eventLoop->nr_fired; j++) {
-	    printf("FD %d fired, mask %d\n",
-		   eventLoop->fired[j].fd,
-		   eventLoop->fired[j].mask);
+	    DBG("FD %d fired, mask %d\n",
+		eventLoop->fired[j].fd,
+		eventLoop->fired[j].mask);
             aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
 	    int ll_mask = fe->ll_mask;
 	    int hl_mask = fe->hl_mask;
