@@ -1072,7 +1072,7 @@ int fable_handle_is_writable_shmem_pipe(struct fable_handle *handle)
   if (any_shared_space(sp))
     return 1;
   else
-    abort();
+    return 0;
 }
 
 static void libevent_recv_handler(int fd, short which, void *ctxt)
