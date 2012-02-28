@@ -456,7 +456,7 @@ int showThroughput(struct aeEventLoop *eventLoop, long long id, void *clientData
     float rps = (float)config.donerequests/dt;
     printf("%s: %.2f\r", config.title, rps);
     fflush(stdout);
-    return 10000; /* every 250ms */
+    return 250; /* every 250ms */
 }
 
 int main(int argc, char **argv) {
@@ -470,7 +470,7 @@ int main(int argc, char **argv) {
     config.requests = 10000;
     config.liveclients = 0;
     config.el = aeCreateEventLoop();
-    aeCreateTimeEvent(config.el,10000,showThroughput,NULL,NULL);
+    aeCreateTimeEvent(config.el,1,showThroughput,NULL,NULL);
     config.keepalive = 1;
     config.donerequests = 0;
     config.datasize = 3;
