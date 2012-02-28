@@ -26,6 +26,8 @@
 
 #include "fable/fable.h"
 
+#include <valgrind/valgrind.h>
+
 /* some POSIX systems need the following definition
  * to get mlockall flags out of sys/mman.h.  */
 #ifndef _P1003_1B_VISIBLE
@@ -4698,15 +4700,21 @@ int main (int argc, char **argv) {
      * as needed.
      */
 
-    if (getrlimit(RLIMIT_NOFILE, &rlim) != 0) {
-        fprintf(stderr, "failed to getrlimit number of files\n");
-        exit(EX_OSERR);
-    } else {
-        rlim.rlim_cur = settings.maxconns;
-        rlim.rlim_max = settings.maxconns;
-        if (setrlimit(RLIMIT_NOFILE, &rlim) != 0) {
-            fprintf(stderr, "failed to set rlimit for open files. Try starting as root or requesting smaller maxconns value.\n");
+    /*
+     * This often fails when running Valgrind, for some reason, so
+     * just don't bother.
+     */
+    if (!RUNNING_ON_VALGRIND) {
+        if (getrlimit(RLIMIT_NOFILE, &rlim) != 0) {
+            fprintf(stderr, "failed to getrlimit number of files\n");
             exit(EX_OSERR);
+        } else {
+            rlim.rlim_cur = settings.maxconns;
+            rlim.rlim_max = settings.maxconns;
+            if (setrlimit(RLIMIT_NOFILE, &rlim) != 0) {
+                fprintf(stderr, "failed to set rlimit for open files. Try starting as root or requesting smaller maxconns value (%s).\n", strerror(errno));
+                exit(EX_OSERR);
+            }
         }
     }
 
