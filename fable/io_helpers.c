@@ -74,7 +74,8 @@ int unix_send_fd(int sockfd, int sendfd) {
   msg.msg_iovlen = 1;
   msg.msg_control = control;
   msg.msg_controllen = sizeof(control);
-  
+
+  memset(control, 0, sizeof(control));
   cmsg = CMSG_FIRSTHDR(&msg);
   cmsg->cmsg_level = SOL_SOCKET;
   cmsg->cmsg_type = SCM_RIGHTS;
