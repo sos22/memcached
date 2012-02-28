@@ -42,6 +42,7 @@ endif
 
 memcached_debug_SOURCES = $(memcached_SOURCES)
 memcached_CPPFLAGS = -DNDEBUG
+memcached_CFLAGS = -O2
 memcached_debug_LDADD = @PROFILER_LDFLAGS@
 memcached_debug_CFLAGS = @PROFILER_FLAGS@
 
