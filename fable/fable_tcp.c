@@ -81,6 +81,10 @@ struct fable_handle *fable_connect_tcp(const char* name, int UNUSED_PARAMETER di
     return 0;
   }
 
+  int yes = 1;
+  if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) == -1)
+    abort();
+
   handle = malloc(sizeof(*handle));
   handle->fd = fd;
   handle->name = NULL;
@@ -160,6 +164,9 @@ struct fable_handle *fable_accept_tcp(struct fable_handle *_listen_handle, int U
   acc_handle->fd = newfd;
   acc_handle->name = NULL;
   fable_set_nonblocking_tcp((struct fable_handle *)acc_handle);
+  int yes = 1;
+  if (setsockopt(newfd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) == -1)
+    abort();
   return (struct fable_handle *)acc_handle;
 }
 
