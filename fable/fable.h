@@ -6,10 +6,11 @@
 #include <sys/select.h> // For fd_set
 #include <sys/socket.h>
 #include <sys/uio.h> // For struct iovec
+#include <assert.h>
+#include <errno.h>
 #include <stdlib.h> // For abort()
 #include <stdio.h>
 #include <string.h>
-#include <errno.h>
 
 struct fable_buf {
 
@@ -35,6 +36,7 @@ struct fable_buf {
 #define fable_ready CONC(fable_ready_, FABLE_TYPE)
 #define fable_get_write_buf CONC(fable_get_write_buf_, FABLE_TYPE)
 #define fable_lend_write_buf CONC(fable_lend_write_buf_, FABLE_TYPE)
+#define fable_lend_write_bufs CONC(fable_lend_write_bufs_, FABLE_TYPE)
 #define fable_release_write_buf CONC(fable_release_write_buf_, FABLE_TYPE)
 #define fable_abandon_write_buf CONC(fable_abandon_write_buf_, FABLE_TYPE)
 #define fable_get_read_buf CONC(fable_get_read_buf_, FABLE_TYPE)
@@ -84,8 +86,14 @@ struct fable_handle;
   struct fable_buf* fable_lend_write_buf_ ## name (struct fable_handle *handle,	\
 						   const char* buf,	\
 						   unsigned len);	\
+  struct fable_buf* fable_lend_write_bufs_ ## name (struct fable_handle *handle,	\
+						    struct iovec *iovs, \
+						    unsigned nr_iovs);	\
   int fable_release_write_buf_ ## name (struct fable_handle* handle,	\
 					struct fable_buf* buf);		\
+  int fable_multi_release_write_buf_ ## name (struct fable_handle* handle, \
+					      struct fable_buf** bufs,	\
+					      int nr_bufs);		\
   void fable_abandon_write_buf_ ## name (struct fable_handle* handle,	\
 					 struct fable_buf* buf);	\
   int fable_lend_read_buf_ ## name (struct fable_handle *handle,	\
@@ -142,24 +150,33 @@ static inline ssize_t fable_blocking_write(struct fable_handle *handle, const vo
   abort();
 }
 
-static inline ssize_t fable_blocking_sendmsg(struct fable_handle *handle, const struct msghdr *hdr)
+static inline ssize_t fable_blocking_sendmsg(struct fable_handle *handle, struct msghdr *hdr)
 {
+  struct fable_buf *buf;
+  size_t buf_size;
   unsigned i;
-  ssize_t res = 0;
-  for (i = 0; i < hdr->msg_iovlen; i++) {
-    ssize_t r = fable_blocking_write(handle, hdr->msg_iov[i].iov_base, hdr->msg_iov[i].iov_len);
-    if (r < 0) {
-      if (res == 0) {
-	res = r;
-	break;
-      }
-    } else {
-      res += r;
-    }
-    if (r != (ssize_t)hdr->msg_iov[i].iov_len)
-      break;
+  buf = fable_lend_write_bufs(handle, hdr->msg_iov, hdr->msg_iovlen);
+  if (!buf)
+    return -1;
+  buf_size = 0;
+  for (i = 0; i < buf->nbufs; i++)
+    buf_size += buf->bufs[i].iov_len;
+  int r = fable_release_write_buf(handle, buf);
+  if (r == 0)
+    return 0;
+  if (r == 1)
+    return buf_size;
+  assert(r == -1);
+  if (errno == EAGAIN) {
+    buf_size = buf->written;
+    fable_abandon_write_buf(handle, buf);
+    if (buf_size == 0)
+      return -1;
+    else
+      return buf_size;
+  } else {
+    return r;
   }
-  return res;
 }
 #endif
 
