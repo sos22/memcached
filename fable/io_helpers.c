@@ -50,22 +50,8 @@ void read_all_fd(int fd, char* buf, int len) {
 
 void write_all_fd(int fd, const void* _buf, int len, int ignore_close) {
   const char *buf = _buf;
-  fd_set wfds;
 
   while(len) {
-    
-    FD_ZERO(&wfds);
-    FD_SET(fd, &wfds);
-
-    int ret = select(fd + 1, 0, &wfds, 0, 0);
-
-    if(ret == -1) {
-      if(errno == EAGAIN || errno == EINTR)
-	continue;
-      fprintf(stderr, "Select failed: %s\n", strerror(errno));
-      exit(1);
-    }
-
     int this_write = send(fd, buf, len, ignore_close ? MSG_NOSIGNAL : 0);
     if(this_write == -1) {
       if(errno == EAGAIN || errno == EINTR)
