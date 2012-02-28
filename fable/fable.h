@@ -129,6 +129,8 @@ static inline ssize_t fable_blocking_write(struct fable_handle *handle, const vo
   if (r == 1)
     return bufsize;
   if (r == -1) {
+    if (errno != EAGAIN)
+      return r;
     int res = fbuf->written;
     printf("fable release partial completion: %d, %s\n", res, strerror(errno));
     fable_abandon_write_buf(handle, fbuf);
