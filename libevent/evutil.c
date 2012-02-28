@@ -24,7 +24,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#define _GNU_SOURCE
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -53,6 +52,8 @@
 #include "event-internal.h"
 #include "evutil.h"
 #include "log.h"
+
+#define _EVENT_HAVE_GETTIMEOFDAY
 
 int
 evutil_socketpair(int family, int type, int protocol, int fd[2])

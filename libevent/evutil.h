@@ -38,7 +38,10 @@
 extern "C" {
 #endif
 
-#include <event-config.h>
+#define _EVENT_HAVE_SYS_TIME_H
+#define _EVENT_HAVE_STDINT_H
+#define _EVENT_HAVE_SYS_TYPES_H
+#define _EVENT_HAVE_GETTIMEOFDAY
 #ifdef _EVENT_HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
@@ -51,6 +54,10 @@ extern "C" {
 #include <sys/types.h>
 #endif
 #include <stdarg.h>
+
+#define _EVENT_SIZEOF_LONG 8
+#define _EVENT_SIZEOF_INT 4
+#define _EVENT_SIZEOF_SHORT 2
 
 #ifdef _EVENT_HAVE_UINT64_T
 #define ev_uint64_t uint64_t

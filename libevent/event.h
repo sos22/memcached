@@ -159,7 +159,7 @@
 extern "C" {
 #endif
 
-#include <event-config.h>
+  //#include <event-config.h>
 #ifdef _EVENT_HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
@@ -172,7 +172,7 @@ extern "C" {
 #include <stdarg.h>
 
 /* For int types. */
-#include <evutil.h>
+#include "libevent/evutil.h"
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN

@@ -8,7 +8,7 @@ ifeq ($(uname_S),SunOS)
   CFLAGS?= -std=c99 -pedantic $(OPTIMIZATION) -Wall -W -D__EXTENSIONS__ -D_XPG6
   CCLINK?= -ldl -lnsl -lsocket -lm
 else
-  CFLAGS?= -std=c99 $(OPTIMIZATION) -Wall -W $(ARCH) $(PROF)
+  CFLAGS?= -I.. -D_GNU_SOURCE -std=c99 $(OPTIMIZATION) -Wall -W $(ARCH) $(PROF)
   CCLINK?= -lm -lrt
 endif
 CCOPT= $(CFLAGS) $(CCLINK) $(ARCH) $(PROF)
