@@ -1,4 +1,4 @@
-#define FABLE_TYPE unixdomain
+#define FABLE_TYPE shmem_pipe
 
 #ifndef FABLE_H
 #define FABLE_H

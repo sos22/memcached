@@ -864,16 +864,17 @@ struct fable_buf* fable_get_write_buf_shmem_pipe(struct fable_handle* handle, un
 
 int fable_release_write_buf_shmem_pipe(struct fable_handle* handle, struct fable_buf* fbuf)
 {
-  DBGPRINT("release write buf on %p\n", (void*)handle);
   struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
-  struct extent ext;
-
-  unsigned long offset = ((char*)fbuf->bufs[0].iov_base) - ((char*)sp->ring);
-  ext.base = offset;
-  ext.size = fbuf->bufs[0].iov_len;
+  struct extent ext[fbuf->nbufs];
+  unsigned x;
+  DBGPRINT("release write buf on %p\n", (void*)handle);
+  for (x = 0; x < fbuf->nbufs; x++) {
+    ext[x].base = ((char*)fbuf->bufs[x].iov_base) - ((char*)sp->ring);
+    ext[x].size = fbuf->bufs[x].iov_len;
+  }
 
   // TODO: Blocking ops in nonblocking context
-  write_all_fd(sp->fd, (char*)&ext, sizeof(ext), 1 /* Allow writing to closed socket */);
+  write_all_fd(sp->fd, ext, sizeof(ext[0]) * fbuf->nbufs, 1 /* Allow writing to closed socket */);
 
   return 1;
 }
@@ -1004,8 +1005,8 @@ int fable_lend_read_buf_shmem_pipe(struct fable_handle* handle, char* buf, unsig
 
 // lend-write creates a stateful buffer object which is released like a normal one.
 // Simply do the copy-in now and note the result in the 'written' field.
-struct fable_buf* fable_lend_write_buf_shmem_pipe(struct fable_handle* handle, const char* buf, unsigned len) {
-
+struct fable_buf* fable_lend_write_buf_shmem_pipe(struct fable_handle* handle, const char* buf, unsigned len)
+{
   struct fable_buf* fbuf = fable_get_write_buf_shmem_pipe(handle, len);
   if(!fbuf) {
     DBGPRINT("fable_lend_write_buf_shmem_pipe: shared arena is full!\n");
@@ -1016,7 +1017,87 @@ struct fable_buf* fable_lend_write_buf_shmem_pipe(struct fable_handle* handle, c
   fbuf->written = fbuf->bufs[0].iov_len;
 
   return fbuf;
+}
 
+struct fable_buf *fable_lend_write_bufs_shmem_pipe(struct fable_handle *handle,
+						   struct iovec *iovs,
+						   unsigned nr_iovs)
+{
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_SEND);
+  struct fable_buf *res;
+  size_t total_to_alloc;
+  unsigned x;
+  size_t total_allocated;
+  unsigned nr_iovs_allocated;
+  int input_iovs_consumed;
+  int input_consumed_this_iov;
+
+  total_to_alloc = 0;
+  for (x = 0; x < nr_iovs; x++)
+    total_to_alloc += iovs[x].iov_len;
+
+  DBGPRINT("Sending %zd bytes from %d frags\n", total_to_alloc, nr_iovs);
+
+  /* Simultaneously allocate shared arena space and repack the input
+     vectors into as few arena chunks as possible. */
+  res = malloc(sizeof(*res) + sizeof(struct iovec));
+  res->written = 0;
+  res->nbufs = 0;
+  res->bufs = (struct iovec *)(res + 1);
+  total_allocated = 0;
+  nr_iovs_allocated = 1;
+  input_iovs_consumed = 0;
+  input_consumed_this_iov = 0;
+  while (total_allocated < total_to_alloc) {
+    unsigned this_alloc_size;
+    unsigned this_alloc;
+    this_alloc_size = total_to_alloc - total_allocated;
+    this_alloc = alloc_shared_space(sp, &this_alloc_size);
+    if (this_alloc == ALLOC_FAILED) {
+      if (wait_for_returned_buffers(sp) != 1)
+	break;
+      continue;
+    }
+    DBGPRINT("Asked for %zd bytes, got %d at %d\n",
+	   total_to_alloc - total_allocated,
+	   this_alloc_size,
+	   this_alloc);
+    if (res->nbufs == nr_iovs_allocated) {
+      nr_iovs_allocated += 6;
+      res = realloc(res, sizeof(*res) + nr_iovs_allocated * sizeof(struct iovec));
+      res->bufs = (struct iovec *)(res + 1);
+    }
+    res->bufs[res->nbufs].iov_base = (void *)((unsigned long)sp->ring + this_alloc);
+    res->bufs[res->nbufs].iov_len = this_alloc_size;
+
+    void *output_cursor = res->bufs[res->nbufs].iov_base;
+    unsigned out_left_this_frag = this_alloc_size;
+    while (out_left_this_frag != 0) {
+      const void *input_cursor =
+	(const void *)((unsigned long)iovs[input_iovs_consumed].iov_base +
+		       input_consumed_this_iov);
+      unsigned bytes_this_frag = iovs[input_iovs_consumed].iov_len - input_consumed_this_iov;
+      if (bytes_this_frag > out_left_this_frag)
+	bytes_this_frag = out_left_this_frag;
+      DBGPRINT("memcpy(%p, %p, %d) (%d, %zd, %d)\n", output_cursor, input_cursor, bytes_this_frag,
+	     input_iovs_consumed,
+	     iovs[input_iovs_consumed].iov_len,
+	     input_consumed_this_iov);
+      memcpy(output_cursor, input_cursor, bytes_this_frag);
+      output_cursor = (void *)((unsigned long)output_cursor + bytes_this_frag);
+      out_left_this_frag -= bytes_this_frag;
+      input_consumed_this_iov += bytes_this_frag;
+      if (input_consumed_this_iov == iovs[input_iovs_consumed].iov_len) {
+	input_iovs_consumed++;
+	input_consumed_this_iov = 0;
+      }
+    }
+
+    res->nbufs++;
+    total_allocated += this_alloc_size;
+  }
+
+  return res;
 }
 
 const char *fable_handle_name_shmem_pipe(struct fable_handle* handle)
