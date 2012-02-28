@@ -1,4 +1,4 @@
-#define FABLE_TYPE unixdomain
+#define FABLE_TYPE tcp
 
 #ifndef FABLE_H
 #define FABLE_H
@@ -178,6 +178,13 @@ struct fable_event_unixdomain {
   void *ctxt;
 };
 
+struct fable_event_tcp {
+  struct event event;
+  struct fable_handle *handle;
+  void (*handler)(struct fable_handle *, short, void *);
+  void *ctxt;
+};
+
 #define mk_api(type)							\
   void fable_add_event_ ## type (struct fable_event_ ## type *evt,	\
 				 struct event_base *base,		\
@@ -191,6 +198,7 @@ struct fable_event_unixdomain {
 
 mk_api(shmem_pipe)
 mk_api(unixdomain)
+mk_api(tcp)
 #endif
 
 #endif

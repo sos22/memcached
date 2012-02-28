@@ -22,6 +22,7 @@ memcached_SOURCES = memcached.c memcached.h \
 		    libevent/signal.c \
 		    libevent/evutil.c \
 		    libevent/epoll.c \
+		    fable/fable_tcp.c \
 		    fable/fable_shmem_pipe.c \
 		    fable/fable_unixdomain.c \
 		    fable/io_helpers.c

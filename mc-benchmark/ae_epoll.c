@@ -72,6 +72,7 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
 
     retval = epoll_wait(state->epfd,state->events,AE_SETSIZE,
             tvp ? (tvp->tv_sec*1000 + tvp->tv_usec/1000) : -1);
+    geteuid();
     if (retval > 0) {
         int j;
 

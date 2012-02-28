@@ -15,6 +15,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <netinet/tcp.h>
+
 #define UNUSED_PARAMETER __attribute__((unused))
 
 struct fable_buf_tcp {
@@ -342,10 +344,29 @@ const char *fable_handle_name_tcp(struct fable_handle *handle)
   return h->name;
 }
 
-int fable_get_fd_tcp(struct fable_handle *handle)
+int fable_get_fd_read_tcp(struct fable_handle *handle, int *read)
 {
   struct fable_handle_tcp *h = (struct fable_handle_tcp *)handle;
+  *read = 1;
   return h->fd;
+}
+
+int fable_get_fd_write_tcp(struct fable_handle *handle, int *read)
+{
+  struct fable_handle_tcp *h = (struct fable_handle_tcp *)handle;
+  *read = 0;
+  return h->fd;
+}
+
+/* These are only supposed to return true if the handle is
+   readable/writable but the underlying FD isn't.  Unix domain handles
+   are such simple wrappers around FDs that that never actually
+   happens. */
+int fable_handle_is_readable_tcp(struct fable_handle *handle) {
+  return 0;
+}
+int fable_handle_is_writable_tcp(struct fable_handle *handle) {
+  return 0;
 }
 
 void fable_abandon_write_buf_tcp(UNUSED_PARAMETER struct fable_handle *handle,
@@ -358,34 +379,34 @@ void fable_abandon_write_buf_tcp(UNUSED_PARAMETER struct fable_handle *handle,
 /* libevent integration */
 static void libevent_event_handler(int fd, short which, void *ctxt)
 {
-  struct fable_event *evt = ctxt;
+  struct fable_event_tcp *evt = ctxt;
   evt->handler(evt->handle, which, evt->ctxt);
 }
-
-void fable_add_event(struct fable_event *evt,
-		     struct event_base *base,
-		     struct fable_handle *handle,
-		     short event_flags,
-		     void (*handler)(struct fable_handle *handle,
-				     short which, void *ctxt),
-		     void *ctxt)
+void fable_add_event_tcp(struct fable_event_tcp *evt,
+			 struct event_base *base,
+			 struct fable_handle *handle,
+			 short event_flags,
+			 void (*handler)(struct fable_handle *handle,
+					 short which, void *ctxt),
+			 void *ctxt)
 {
+  struct fable_handle_tcp *h = (struct fable_handle_tcp *)handle;
   evt->handle = handle;
   evt->handler = handler;
   evt->ctxt = ctxt;
-  event_set(&evt->event, fable_get_fd(handle), event_flags, libevent_event_handler, evt);
+  event_set(&evt->event, h->fd, event_flags, libevent_event_handler, evt);
   event_base_set(base, &evt->event);
 
   if (event_add(&evt->event, 0) == -1)
     abort();
 }
 
-void fable_event_del(struct fable_event *evt)
+void fable_event_del(struct fable_event_tcp *evt)
 {
   event_del(&evt->event);
 }
 
-void fable_event_change_flags(struct fable_event *evt, short flags)
+void fable_event_change_flags(struct fable_event_tcp *evt, short flags)
 {
   event_del(&evt->event);
   fable_add_event(evt, evt->event.ev_base, evt->handle, flags, evt->handler, evt->ctxt);

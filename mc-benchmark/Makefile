@@ -20,7 +20,7 @@ INSTALL= cp -p
 
 BENCHOBJ = ae.o anet.o mc-benchmark.o sds.o adlist.o zmalloc.o
 BENCHOBJ += ../libevent/event.o ../libevent/log.o ../libevent/signal.o ../libevent/evutil.o ../libevent/epoll.o
-BENCHOBJ += ../fable/fable_shmem_pipe.o ../fable/fable_unixdomain.o ../fable/io_helpers.o
+BENCHOBJ += ../fable/fable_shmem_pipe.o ../fable/fable_unixdomain.o ../fable/io_helpers.o ../fable/fable_tcp.o
 
 BENCHPRGNAME = mc-benchmark
 
