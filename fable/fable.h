@@ -1,4 +1,4 @@
-#define FABLE_TYPE tcp
+#define FABLE_TYPE unixdomain
 
 #ifndef FABLE_H
 #define FABLE_H

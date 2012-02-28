@@ -2,7 +2,6 @@
 
 #include "../libevent/event.h"
 
-#define FABLE_TYPE tcp
 #include "fable.h"
 
 #include <sys/types.h>
@@ -467,13 +466,13 @@ void fable_add_event_tcp(struct fable_event_tcp *evt,
     abort();
 }
 
-void fable_event_del(struct fable_event_tcp *evt)
+void fable_event_del_tcp(struct fable_event_tcp *evt)
 {
   event_del(&evt->event);
 }
 
-void fable_event_change_flags(struct fable_event_tcp *evt, short flags)
+void fable_event_change_flags_tcp(struct fable_event_tcp *evt, short flags)
 {
   event_del(&evt->event);
-  fable_add_event(evt, evt->event.ev_base, evt->handle, flags, evt->handler, evt->ctxt);
+  fable_add_event_tcp(evt, evt->event.ev_base, evt->handle, flags, evt->handler, evt->ctxt);
 }

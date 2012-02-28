@@ -169,15 +169,76 @@ struct fable_buf* fable_lend_write_buf_unixdomain(struct fable_handle* handle, c
 
 }
 
-int fable_release_write_buf_unixdomain(struct fable_handle* handle, struct fable_buf* buf) {
+struct fable_buf* fable_lend_write_bufs_unixdomain(struct fable_handle *handle,
+						   struct iovec *iovs,
+						   unsigned nr_iovs)
+{
+  struct fable_buf_unix* new_buf = (struct fable_buf_unix*)malloc(sizeof(struct fable_buf_unix));
+  new_buf->base.bufs = iovs;
+  new_buf->base.nbufs = nr_iovs;
+  new_buf->base.written = 0;
 
-  int fd = *((int*)handle);
+  return &(new_buf->base);
+}
 
-  int remaining_write = buf->bufs[0].iov_len - buf->written;
-  int write_ret = write(fd, ((char*)buf->bufs[0].iov_base) + buf->written, remaining_write);
+int fable_release_write_buf_unixdomain(struct fable_handle *handle, struct fable_buf* buf)
+{
+  int fd = *(int *)handle;
+  int nr_iovecs_complete;
+  size_t written;
+  size_t unwritten;
+  ssize_t sendmsg_res;
+  unsigned done_this_iov;
+  unsigned x;
+  struct msghdr mh;
 
-  // Freeing buf should be safe as it's the first member of struct fable_buf_unix.
-  if(write_ret == -1) {
+  if (buf->nbufs == 1) {
+    unwritten = buf->bufs[0].iov_len - buf->written;
+    sendmsg_res = write(fd,
+			(void *)((unsigned long)buf->bufs[0].iov_base + buf->written),
+			unwritten);
+  } else {
+    written = 0;
+    nr_iovecs_complete = 0;
+    while (1) {
+      assert(nr_iovecs_complete < buf->nbufs);
+      if (written + buf->bufs[nr_iovecs_complete].iov_len > buf->written) {
+	done_this_iov = written - buf->written;
+	buf->bufs[nr_iovecs_complete].iov_base =
+	  (void *)((unsigned long)buf->bufs[nr_iovecs_complete].iov_base + done_this_iov);
+	buf->bufs[nr_iovecs_complete].iov_len -= done_this_iov;
+	break;
+      }
+      written += buf->bufs[nr_iovecs_complete].iov_len;
+      nr_iovecs_complete++;
+    }
+
+    unwritten = 0;
+    for (x = nr_iovecs_complete; x < buf->nbufs; x++)
+      unwritten += buf->bufs[x].iov_len;
+
+    memset(&mh, 0, sizeof(mh));
+    mh.msg_iov = buf->bufs + nr_iovecs_complete;
+    mh.msg_iovlen = buf->nbufs - nr_iovecs_complete;
+    sendmsg_res = sendmsg(fd,
+			  &mh,
+			  0);
+    buf->bufs[nr_iovecs_complete].iov_base =
+      (void *)((unsigned long)buf->bufs[nr_iovecs_complete].iov_base - done_this_iov);
+    buf->bufs[nr_iovecs_complete].iov_len += done_this_iov;
+  }
+
+  /* The return cases:
+
+     return 1 -> completely transmitted the buffer and freed it out
+     return 0 -> got EOF without transmitting anything, freed buffer
+     return -1, errno = EAGAIN -> temporary lack of buffer space,
+                                  part of buffer transmitted,
+				  buffer *not* freed.
+     return -1, errno != EAGAIN -> hard error, nothing transmitted,
+                                   buffer freed.
+  */
+  if(sendmsg_res == -1) {
     if(errno == EAGAIN || errno == EINTR) {
       errno = EAGAIN;
       return -1;
@@ -187,20 +248,18 @@ int fable_release_write_buf_unixdomain(struct fable_handle* handle, struct fable
       return -1;
     }
   }
-  else if(write_ret == 0) {
+  if (sendmsg_res == 0) {
     free(buf);
     return 0;
   }
-  else if(write_ret < remaining_write) {
+  if (sendmsg_res < unwritten) {
     errno = EAGAIN;
-    buf->written += write_ret;
+    buf->written += sendmsg_res;
     return -1;
   }
-  else {
-    free(buf);
-    return 1;
-  }
 
+  free(buf);
+  return 1;
 }
 
 void fable_abandon_write_buf_unixdomain(struct fable_handle *handle, struct fable_buf *buf) {
