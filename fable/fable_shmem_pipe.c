@@ -706,28 +706,73 @@ struct fable_handle* fable_connect_shmem_pipe(const char* name, int direction)
   return res;
 }
 
+static int fill_incoming_buffers(struct shmem_simplex *sp)
+{
+  while(sp->incoming_bytes_consumed - sp->incoming_bytes < sizeof(struct extent)) {
+    int k = read(sp->fd, (char *)sp->incoming + sp->incoming_bytes, sizeof(sp->incoming) - sp->incoming_bytes);
+    if (k == 0) {
+      DBGPRINT("read failed: socket empty: %s\n", strerror(errno));
+      return 0;
+    }
+    if (k < 0) {
+      DBGPRINT("read failed: error %s\n", strerror(errno));
+      if(errno == ECONNRESET) {
+	errno = 0;
+	return 0;
+      } else {
+	return -1;
+      }
+    }
+    sp->incoming_bytes += k;
+  }
+  return 1;
+}
+
+/* Remove the first extent from the incoming extents buffer. */
+static void drain_incoming_buffer(struct shmem_simplex *sp)
+{
+  sp->incoming_bytes_consumed += sizeof(struct extent);
+  if(sp->incoming_bytes_consumed - sp->incoming_bytes < sizeof(struct extent)) {
+    memmove(sp->incoming, sp->incoming + sp->incoming_bytes_consumed, sp->incoming_bytes - sp->incoming_bytes_consumed);
+    sp->incoming_bytes -= sp->incoming_bytes_consumed;
+    sp->incoming_bytes_consumed = 0;
+  }
+}
+
+static void queue_extent_release(struct shmem_simplex *sp, unsigned offset, unsigned len)
+{
+  // Queue it for transmission back to the writer
+  struct extent *out;
+  out = &sp->outgoing_extents[(int)sp->nr_outgoing_extents-1];
+  /* Try to reuse previous outgoing extent */
+  if (sp->nr_outgoing_extents != 0 && out->base + out->size == offset) {
+    out->size += len;
+  } else {
+    out++;
+    out->base = offset;
+    out->size = len;
+    sp->nr_outgoing_extents++;
+    assert(sp->nr_outgoing_extents < EXTENT_BUFFER_SIZE/sizeof(struct extent));
+  }
+  sp->outgoing_extent_bytes += len;
+
+  // Send the queued extents, if the queue is big enough
+
+  // TODO: blocking operations regardless of nonblocking status.
+  if (sp->outgoing_extent_bytes > ring_size / 8) {
+    write_all_fd(sp->fd, (char*)sp->outgoing_extents, sp->nr_outgoing_extents * sizeof(struct extent), 1 /* Allow writing to closed socket */);
+    sp->nr_outgoing_extents = 0;
+    sp->outgoing_extent_bytes = 0;
+  }
+}
+
 struct fable_buf* fable_get_read_buf_shmem_pipe(struct fable_handle* handle, unsigned len)
 {
   DBGPRINT("get read buf on %p\n", (void *)handle);
   struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
 
-  while(sp->incoming_bytes_consumed - sp->incoming_bytes < sizeof(struct extent)) {
-
-    int k = read(sp->fd, (char *)sp->incoming + sp->incoming_bytes, sizeof(sp->incoming) - sp->incoming_bytes);
-    if (k == 0) {
-      errno = 0;
-      DBGPRINT("read failed: socket empty\n");
-      return 0;
-    }
-    if (k < 0) {
-      DBGPRINT("read failed: error %s\n", strerror(errno));
-      if(errno == ECONNRESET)
-	errno = 0;
-      return 0;
-    }
-    sp->incoming_bytes += k;
-
-  }
+  if (fill_incoming_buffers(sp) <= 0)
+    return NULL;
 
   struct extent *inc = (struct extent*)(sp->incoming + sp->incoming_bytes_consumed);
 
@@ -750,53 +795,20 @@ void fable_release_read_buf_shmem_pipe(struct fable_handle* handle, struct fable
   struct extent tosend;
   // Was the extent fully consumed by this read?
   if(fbuf->bufs[0].iov_len == inc->size) {
-
     tosend = *inc;
-
-    // Dismiss this incoming extent
-    sp->incoming_bytes_consumed += sizeof(struct extent);
-
-    if(sp->incoming_bytes_consumed - sp->incoming_bytes < sizeof(struct extent)) {
-      DBGPRINT("Shuffle incoming queue down.\n");
-      memmove(sp->incoming, sp->incoming + sp->incoming_bytes_consumed, sp->incoming_bytes - sp->incoming_bytes_consumed);
-      sp->incoming_bytes -= sp->incoming_bytes_consumed;
-      sp->incoming_bytes_consumed = 0;
-    }
-
+    drain_incoming_buffer(sp);
   }
   // Otherwise, divide the extent in two; queue one and keep the other.
   else {
-    
     tosend.base = inc->base;
     tosend.size = fbuf->bufs[0].iov_len;
     inc->base += fbuf->bufs[0].iov_len;
     inc->size -= fbuf->bufs[0].iov_len;
-
   }
 
-  // Queue it for transmission back to the writer
-  struct extent *out;
-  out = &sp->outgoing_extents[sp->nr_outgoing_extents-1];
-  /* Try to reuse previous outgoing extent */
-  if (sp->nr_outgoing_extents != 0 && out->base + out->size == tosend.base) {
-    out->size += tosend.size;
-  } else {
-    sp->outgoing_extents[sp->nr_outgoing_extents] = tosend; // Struct copy
-    sp->nr_outgoing_extents++;
-  }
-  sp->outgoing_extent_bytes += tosend.size;
-
-  // Send the queued extents, if the queue is big enough
-
-  // TODO: blocking operations regardless of nonblocking status.
-  if (sp->outgoing_extent_bytes > ring_size / 8) {
-    write_all_fd(sp->fd, (char*)sp->outgoing_extents, sp->nr_outgoing_extents * sizeof(struct extent), 1 /* Allow writing to closed socket */);
-    sp->nr_outgoing_extents = 0;
-    sp->outgoing_extent_bytes = 0;
-  }
+  queue_extent_release(sp, tosend.base, tosend.size);
 
   free(fbuf);
-
 }
 
 // Return 1 for success, 0 for remote closed, -1 for error including EAGAIN
@@ -982,23 +994,40 @@ void fable_close_shmem_pipe(struct fable_handle* handle)
 }
 
 // lend-read is a one shot read-into-this operation.
-int fable_lend_read_buf_shmem_pipe(struct fable_handle* handle, char* buf, unsigned len) {
+int fable_lend_read_buf_shmem_pipe(struct fable_handle* handle, char* buf, unsigned len)
+{
+  struct shmem_simplex *sp = simplex_from_fable_handle(handle, SIMPLEX_RECV);
+  struct extent *inc;
+  int consumed;
+  int r;
+  unsigned base;
 
-  struct fable_buf* fbuf = fable_get_read_buf_shmem_pipe(handle, len);
-  if(!fbuf) {
-    DBGPRINT("Failed to lend read buf; %s\n", strerror(errno));
-    if(errno == 0)
+  r = fill_incoming_buffers(sp);
+  if (r <= 0) {
+    if (errno == 0)
       return 0;
     else
       return -1;
   }
 
-  memcpy(buf, fbuf->bufs[0].iov_base, fbuf->bufs[0].iov_len);
-  unsigned ret = fbuf->bufs[0].iov_len;
+  inc = (struct extent *)(sp->incoming + sp->incoming_bytes_consumed);
+  if (len >= inc->size) {
+    /* Consume entire message */
+    consumed = inc->size;
+    base = inc->base;
+    drain_incoming_buffer(sp);
+  } else {
+    /* Just consume the first @len bytes of the message */
+    consumed = len;
+    base = inc->base;
+    inc->base += len;
+    inc->size -= len;
+  }
 
-  fable_release_read_buf_shmem_pipe(handle, fbuf);
+  memcpy(buf, (const void *)((unsigned long)sp->ring + base), consumed);
+  queue_extent_release(sp, base, consumed);
 
-  return ret;
+  return consumed;
 
 }
 
