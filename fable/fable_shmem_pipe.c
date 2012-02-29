@@ -1185,22 +1185,22 @@ int fable_handle_is_writable_shmem_pipe(struct fable_handle *handle)
 
 static void libevent_recv_handler(int fd, short which, void *ctxt)
 {
-  /* XXX should maybe re-insert the event if the handler doesn't clear
-     it completely? */
   struct fable_event_shmem_pipe *evt = ctxt;
   DBGPRINT("Receive event fired on %p\n", (void*)evt->handle);
   evt->handler(evt->handle, which, evt->ctxt);
+  if (evt->initialised && fable_handle_is_readable_shmem_pipe(evt->handle))
+      event_active(&evt->recv_event, EV_READ, 1);
 }
 static void libevent_send_handler(int fd, short which, void *ctxt)
 {
-  /* XXX should maybe re-insert the event if the handler doesn't clear
-     it completely? */
   struct fable_event_shmem_pipe *evt = ctxt;
   struct shmem_simplex *sp = simplex_from_fable_handle(evt->handle, SIMPLEX_SEND);
   DBGPRINT("Send event fired on %p\n", (void*)evt->handle);
   wait_for_returned_buffers(sp);
   if (any_shared_space(sp))
     evt->handler(evt->handle, EV_WRITE | (which & ~EV_READ), evt->ctxt);
+  if (evt->initialised && fable_handle_is_writable_shmem_pipe(evt->handle))
+    event_active(&evt->send_event, EV_READ, 1);
 }
 static void libevent_accept_handler(int fd, short which, void *ctxt)
 {
@@ -1225,6 +1225,8 @@ void fable_add_event_shmem_pipe(struct fable_event_shmem_pipe *evt,
   evt->handler = handler;
   evt->ctxt = ctxt;
   evt->base = base;
+
+  evt->initialised = 1;
 
   if (!recv_sp && !send_sp) {
     struct shmem_handle *sh = (struct shmem_handle *)handle;
@@ -1279,10 +1281,12 @@ void fable_add_event_shmem_pipe(struct fable_event_shmem_pipe *evt,
 
 void fable_event_del_shmem_pipe(struct fable_event_shmem_pipe *evt)
 {
+  assert(evt->initialised);
   if (simplex_from_fable_handle(evt->handle, SIMPLEX_RECV))
     event_del(&evt->recv_event);
   if (simplex_from_fable_handle(evt->handle, SIMPLEX_SEND))
     event_del(&evt->send_event);
+  evt->initialised = 0;
 }
 
 void fable_event_change_flags_shmem_pipe(struct fable_event_shmem_pipe *evt, short flags)

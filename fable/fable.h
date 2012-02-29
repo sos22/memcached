@@ -186,6 +186,7 @@ struct fable_event_shmem_pipe {
   struct event recv_event;
   struct event_base *base;
   struct fable_handle *handle;
+  int initialised;
   void (*handler)(struct fable_handle *, short, void *);
   void *ctxt;
 };
