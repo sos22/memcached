@@ -580,9 +580,9 @@ accept_simplex(int listen_fd, simplex_id_t simpl)
   read_all_fd(conn_fd, (char*)&seg_pages, sizeof(int));
 
   void* ring_addr = mmap(NULL, PAGE_SIZE * seg_pages, PROT_READ|PROT_WRITE, MAP_SHARED, shmem_fd, 0);
+  close(shmem_fd);
   if(ring_addr == MAP_FAILED) {
     int save_errno = errno;
-    close(shmem_fd);
     close(conn_fd);
     errno = save_errno;
     return 0;
@@ -590,7 +590,6 @@ accept_simplex(int listen_fd, simplex_id_t simpl)
 
   struct shmem_simplex* new_handle = calloc(sizeof(struct shmem_simplex), 1);
   if(!new_handle) {
-    close(shmem_fd);
     close(conn_fd);
     errno = ENOMEM;
     return 0;
