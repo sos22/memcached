@@ -2,6 +2,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#include <assert.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -109,6 +110,7 @@ int unix_recv_fd(int sockfd) {
   if(ret <= 0)
     return -1;
 
+  assert(!(msg.msg_flags & MSG_CTRUNC));
   if(databuf[0] != 'F' || databuf[1] != 'D') {
     errno = EINVAL;
     return -1;
