@@ -228,6 +228,8 @@ static void readHandler(aeEventLoop *el, struct fable_handle *fd, void *privdata
 
     nread = fable_blocking_read(c->fd,buf,sizeof(buf));
     if (nread == -1) {
+	if (errno == EAGAIN || errno == EWOULDBLOCK)
+	    return;
         fprintf(stderr, "Reading from socket: %s\n", strerror(errno));
         freeClient(c);
         return;
