@@ -182,11 +182,10 @@ static inline ssize_t fable_blocking_sendmsg(struct fable_handle *handle, struct
 
 #ifdef _EVENT_H_
 struct fable_event_shmem_pipe {
-  struct event send_event;
-  struct event recv_event;
+  struct event event;
   struct event_base *base;
   struct fable_handle *handle;
-  int initialised;
+  int events_wanted;
   void (*handler)(struct fable_handle *, short, void *);
   void *ctxt;
 };
