@@ -317,6 +317,7 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
 static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 {
     int processed = 0, numevents;
+    int j;
 
     /* Nothing to do? return ASAP */
     if (!(flags & AE_TIME_EVENTS) && !(flags & AE_FILE_EVENTS)) return 0;
@@ -325,9 +326,9 @@ static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
      * file events to process as long as we want to process time
      * events, in order to sleep until the next time event is ready
      * to fire. */
-    if (eventLoop->maxfd != -1 ||
-        ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT))) {
-        int j;
+    if (eventLoop->nr_fired == 0 &&
+	(eventLoop->maxfd != -1 ||
+	 ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT)))) {
         aeTimeEvent *shortest = NULL;
         struct timeval tv, *tvp;
 
@@ -362,45 +363,47 @@ static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
             }
         }
 
-        numevents = aeApiPoll(eventLoop, tvp);
-        for (j = 0; j < eventLoop->nr_fired; j++) {
-	    DBG("FD %d fired, mask %d\n",
-		eventLoop->fired[j].fd,
-		eventLoop->fired[j].mask);
-            aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
-	    int ll_mask = fe->ll_mask;
-	    int hl_mask = fe->hl_mask;
-            int fired_mask = eventLoop->fired[j].mask;
-            int fd = eventLoop->fired[j].fd;
-
-	    ll_mask &= fired_mask;
-	    if (ll_mask == AE_READABLE) {
-		if (hl_mask == AE_READABLE) {
-		    do {
-			fe->rfileProc(eventLoop,fe->handle,fe->clientData,AE_READABLE);
-		    } while (fe->hl_mask == AE_READABLE && fable_handle_is_readable(fe->handle));
-		} else if (hl_mask == AE_WRITABLE) {
-		    do {
-			fe->wfileProc(eventLoop,fe->handle,fe->clientData,AE_WRITABLE);
-		    } while (fe->hl_mask == AE_WRITABLE &&
-			     fable_handle_is_writable(fe->handle));
-		} else {
-		    abort();
-		}
-	    } else if (ll_mask == AE_WRITABLE) {
-	      assert(hl_mask & AE_WRITABLE);
-	      do {
-		fe->wfileProc(eventLoop,fe->handle,fe->clientData,AE_WRITABLE);
-	      } while (fe->hl_mask == AE_WRITABLE &&
-		       fable_handle_is_writable(fe->handle));
-	    } else if (ll_mask == 0) {
-	    } else {
-		abort();
-	    }
-            processed++;
-        }
-	eventLoop->nr_fired = 0;
+        aeApiPoll(eventLoop, tvp);
     }
+
+    for (j = 0; j < eventLoop->nr_fired; j++) {
+      DBG("FD %d fired, mask %d\n",
+	  eventLoop->fired[j].fd,
+	  eventLoop->fired[j].mask);
+      aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
+      int ll_mask = fe->ll_mask;
+      int hl_mask = fe->hl_mask;
+      int fired_mask = eventLoop->fired[j].mask;
+      int fd = eventLoop->fired[j].fd;
+
+      ll_mask &= fired_mask;
+      if (ll_mask == AE_READABLE) {
+	if (hl_mask == AE_READABLE) {
+	  do {
+	    fe->rfileProc(eventLoop,fe->handle,fe->clientData,AE_READABLE);
+	  } while (fe->hl_mask == AE_READABLE && fable_handle_is_readable(fe->handle));
+	} else if (hl_mask == AE_WRITABLE) {
+	  do {
+	    fe->wfileProc(eventLoop,fe->handle,fe->clientData,AE_WRITABLE);
+	  } while (fe->hl_mask == AE_WRITABLE &&
+		   fable_handle_is_writable(fe->handle));
+	} else {
+	  abort();
+	}
+      } else if (ll_mask == AE_WRITABLE) {
+	assert(hl_mask & AE_WRITABLE);
+	do {
+	  fe->wfileProc(eventLoop,fe->handle,fe->clientData,AE_WRITABLE);
+	} while (fe->hl_mask == AE_WRITABLE &&
+		 fable_handle_is_writable(fe->handle));
+      } else if (ll_mask == 0) {
+      } else {
+	abort();
+      }
+      processed++;
+    }
+    eventLoop->nr_fired = 0;
+
     /* Check time events */
     if (flags & AE_TIME_EVENTS)
         processed += processTimeEvents(eventLoop);
