@@ -94,7 +94,8 @@ typedef struct aeEventLoop {
     int maxfd;
     long long timeEventNextId;
     aeFileEvent events[AE_SETSIZE]; /* Registered events */
-    int nr_fired;
+    int fired_producer;
+    int fired_consumer;
     aeFiredEvent fired[AE_SETSIZE]; /* Fired events */
     aeTimeEvent *timeEventHead;
     int stop;

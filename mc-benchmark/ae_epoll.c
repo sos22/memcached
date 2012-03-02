@@ -60,10 +60,10 @@ static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int delmask) {
 
 static void aeApiFireEvent(aeEventLoop *eventLoop, int fd, int mask)
 {
-  assert(eventLoop->nr_fired < AE_SETSIZE);
-  eventLoop->fired[eventLoop->nr_fired].fd = fd;
-  eventLoop->fired[eventLoop->nr_fired].mask = mask;
-  eventLoop->nr_fired++;
+  assert(eventLoop->fired_producer != eventLoop->fired_consumer + AE_SETSIZE);
+  eventLoop->fired[eventLoop->fired_producer % AE_SETSIZE].fd = fd;
+  eventLoop->fired[eventLoop->fired_producer % AE_SETSIZE].mask = mask;
+  eventLoop->fired_producer++;
 }
 
 static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
@@ -72,12 +72,12 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
 
     retval = epoll_wait(state->epfd,state->events,AE_SETSIZE,
             tvp ? (tvp->tv_sec*1000 + tvp->tv_usec/1000) : -1);
+#warning Remember to remove this for real testing!
     geteuid();
     if (retval > 0) {
         int j;
 
         numevents = retval;
-	assert(eventLoop->nr_fired + numevents <= AE_SETSIZE);
         for (j = 0; j < numevents; j++) {
             int mask = 0;
             struct epoll_event *e = state->events+j;

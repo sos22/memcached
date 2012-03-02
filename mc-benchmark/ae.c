@@ -316,8 +316,7 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
  * The function returns the number of events processed. */
 static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 {
-    int processed = 0, numevents;
-    int j;
+    int processed = 0;
 
     /* Nothing to do? return ASAP */
     if (!(flags & AE_TIME_EVENTS) && !(flags & AE_FILE_EVENTS)) return 0;
@@ -326,7 +325,7 @@ static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
      * file events to process as long as we want to process time
      * events, in order to sleep until the next time event is ready
      * to fire. */
-    if (eventLoop->nr_fired == 0 &&
+    if (eventLoop->fired_producer == eventLoop->fired_consumer &&
 	(eventLoop->maxfd != -1 ||
 	 ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT)))) {
         aeTimeEvent *shortest = NULL;
@@ -366,15 +365,15 @@ static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         aeApiPoll(eventLoop, tvp);
     }
 
-    for (j = 0; j < eventLoop->nr_fired; j++) {
+    while (eventLoop->fired_consumer != eventLoop->fired_producer) {
+      int idx = eventLoop->fired_consumer % AE_SETSIZE;
       DBG("FD %d fired, mask %d\n",
-	  eventLoop->fired[j].fd,
-	  eventLoop->fired[j].mask);
-      aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
+	  eventLoop->fired[idx].fd,
+	  eventLoop->fired[idx].mask);
+      aeFileEvent *fe = &eventLoop->events[eventLoop->fired[idx].fd];
       int ll_mask = fe->ll_mask;
       int hl_mask = fe->hl_mask;
-      int fired_mask = eventLoop->fired[j].mask;
-      int fd = eventLoop->fired[j].fd;
+      int fired_mask = eventLoop->fired[idx].mask;
 
       ll_mask &= fired_mask;
       if (ll_mask == AE_READABLE) {
@@ -401,8 +400,10 @@ static int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 	abort();
       }
       processed++;
+
+      eventLoop->fired_consumer++;
     }
-    eventLoop->nr_fired = 0;
+
 
     /* Check time events */
     if (flags & AE_TIME_EVENTS)
